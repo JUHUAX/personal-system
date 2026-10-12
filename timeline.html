@@ -153,7 +153,10 @@
     </section>
 
     <section class="inspiration-view hidden" id="inspirationView">
-      <div class="inspiration-board" id="inspirationBoard"></div>
+      <div class="inspiration-board" id="inspirationBoard">
+        <div class="inspiration-notebook-head"><h2>灵感草稿本</h2><span id="inspirationNotebookStatus" role="status" aria-live="polite">已保存</span></div>
+        <textarea id="inspirationNotebook" aria-label="灵感草稿本" placeholder="想到什么，写在这里…" spellcheck="false"></textarea>
+      </div>
     </section>
 
     <section class="phase-plans-view hidden" id="phasePlansView">
@@ -440,7 +443,6 @@
               <div class="notion-actions">
                 <button class="primary" type="submit">保存待办</button>
                 <button class="ghost hidden" id="notionTodoEditorStart" type="button">开始番茄钟</button>
-                <a class="ghost hidden" id="notionTodoEditorNotion" target="_blank" rel="noreferrer">在 Notion 中查看</a>
                 <button class="ghost" id="notionCancelTodo" type="button">取消</button>
               </div>
             </form>
@@ -493,7 +495,6 @@
           <section class="notion-card">
             <div class="notion-card-head">
               <div><h3>个人节奏</h3><p>LLM 排程必须遵守工作窗口并避开固定安排。</p></div>
-              <a class="notion-card-link hidden" id="notionProfileLink" target="_blank" rel="noreferrer">在 Notion 中查看</a>
             </div>
             <form class="notion-inline-editor" id="notionProfileForm">
               <div class="notion-form-grid">
@@ -592,43 +593,10 @@
             </span>
           </label>
 
-          <label>
-            轮次
-            <input id="recordRound" type="number" min="1" max="999" placeholder="可选" />
-          </label>
-
           <fieldset class="record-review-fields" id="recordReviewFields">
-            <legend>工作评价</legend>
-            <label>
-              完成度
-              <select id="recordCompletion">
-                <option value="">未评价</option>
-                <option value="low">低</option>
-                <option value="medium">中</option>
-                <option value="high">高</option>
-              </select>
-            </label>
-            <label>
-              专注度
-              <select id="recordFocus">
-                <option value="">未评价</option>
-                <option value="poor">差</option>
-                <option value="normal">一般</option>
-                <option value="good">好</option>
-              </select>
-            </label>
-            <label>
-              打断情况
-              <select id="recordInterruption">
-                <option value="">未评价</option>
-                <option value="none">无</option>
-                <option value="light">轻微</option>
-                <option value="severe">严重</option>
-              </select>
-            </label>
+            <legend>完成情况</legend>
             <label class="record-review-note-field">
-              完成情况
-              <textarea id="recordReviewNote" placeholder="可选：记录本轮实际完成的内容"></textarea>
+              <textarea id="recordReviewNote" aria-label="完成情况" placeholder="记录实际完成的内容"></textarea>
             </label>
           </fieldset>
 
@@ -703,6 +671,8 @@
   </div>
 
   <script src="work-prompt-policy.js"></script>
+  <script src="inspiration-notebook.js"></script>
+  <script src="notion-context-menu.js"></script>
   <script src="notion-client.js"></script>
   <script src="timeline.js"></script>
   <script src="notion-integration.js"></script>

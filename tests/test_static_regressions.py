@@ -130,7 +130,41 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("minimalPomodoroInspirations:", source)
         self.assertIn('data-flow-role="inspiration"', source)
         self.assertIn("renderInspirations", source)
-        self.assertIn(".inspiration-card", css)
+        self.assertIn("#inspirationNotebook", css)
+
+    def test_inspiration_notebook_is_one_continuous_editor(self):
+        html = self.read("timeline.html")
+        source = self.read("timeline.js")
+        self.assertIn('id="inspirationNotebook"', html)
+        self.assertIn("InspirationNotebook.rollover", source)
+        self.assertIn("dirtyInspirationDates", source)
+        self.assertIn("inspirationWrites", source)
+        renderer = source.split("function renderInspirations()", 1)[1].split("function refreshNotebookDate", 1)[0]
+        self.assertNotIn("inspiration-card", renderer)
+        self.assertIn("document.activeElement === inspirationNotebook", renderer)
+
+    def test_review_fields_are_completion_only(self):
+        html = self.read("timeline.html")
+        controller = self.read("controller.js")
+        source = self.read("timeline.js")
+        for field in ["recordRound", "recordCompletion", "recordFocus", "recordInterruption"]:
+            self.assertNotIn(f'id="{field}"', html)
+            self.assertNotIn(f"{field}.value", source)
+        self.assertNotIn('data-review-group="', controller)
+        saving = controller.split("async function saveReviewPanel", 1)[1].split("function syncPomodoroReviews", 1)[0]
+        self.assertNotIn("record.completion =", saving)
+        self.assertIn("record.reviewNote =", saving)
+
+    def test_notion_links_are_in_context_menu_only(self):
+        html = self.read("timeline.html")
+        integration = self.read("notion-integration.js")
+        menu = self.read("notion-context-menu.js")
+        self.assertNotIn("notionTodoEditorNotion", html + integration)
+        self.assertNotIn("notionProfileLink", html + integration)
+        self.assertNotIn("<a ", integration)
+        self.assertIn('data-notion-url="', integration)
+        self.assertIn('addEventListener("contextmenu"', menu)
+        self.assertIn('url.protocol === "https:"', menu)
 
     def test_pip_progress_slider_is_removed(self):
         source = self.read("controller.js")

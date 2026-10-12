@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "极简番茄钟",
-  "version": "7.1.1",
+  "version": "7.1.2",
   "description": "极简番茄钟：真实时间采集、时间轴、Dashboard、Notion 同步与 LLM 日报自动化。",
   "permissions": [
     "alarms",

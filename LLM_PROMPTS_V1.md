@@ -1,6 +1,6 @@
-# Minimal Pomodoro 旧扩展 LLM Prompt 精确快照
+# Minimal Pomodoro 浏览器扩展 LLM Prompt 精确快照
 
-更新：2026-10-12。这是保留用于回滚的浏览器扩展，不是当前 Codex 插件运行路径。来源：notion-client.js 和 work-prompt-policy.js；当前插件快照见 LLM_PROMPTS_CODEX_V1.md。
+更新：2026-10-12。当前维护对象为浏览器扩展；Codex 插件方案已舍弃。来源：notion-client.js 和 work-prompt-policy.js。
 
 ## 请求配置
 

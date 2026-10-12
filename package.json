@@ -1,0 +1,10 @@
+{
+  "name": "minimal-pomodoro-extension",
+  "version": "7.1.2",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test_inspiration_notebook.cjs && node tests/test_work_prompts.cjs && python -m unittest tests.test_static_regressions",
+    "test:browser": "node tests/test_browser_ui.cjs"
+  },
+  "devDependencies": { "playwright": "1.62.1" }
+}

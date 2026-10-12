@@ -56,11 +56,6 @@ const PRESENCE_IDLE_MINUTES = {
   reading: 30,
 };
 const CONTROLLER_HEARTBEAT_KEY = "minimalPomodoroControllerHeartbeat";
-let reviewDraft = {
-  completion: "medium",
-  focus: "normal",
-  interruption: "none",
-};
 
 initializeController();
 window.setInterval(() => persistControllerHeartbeat().catch(() => {}), 10000);
@@ -813,30 +808,6 @@ async function refreshPendingReviewCount() {
   }
 }
 
-function reviewValueText(group, value) {
-  const map = {
-    completion: { low: "低", medium: "中", high: "高" },
-    focus: { poor: "差", normal: "一般", good: "好" },
-    interruption: { none: "无", light: "轻微", severe: "严重" },
-  };
-  return map[group]?.[value] || value || "";
-}
-
-function setReviewChoice(group, value) {
-  reviewDraft[group] = value;
-  if (!pip?.reviewModal) return;
-
-  pip.reviewModal.querySelectorAll(`[data-review-group="${group}"] .review-choice`).forEach((button) => {
-    button.classList.toggle("active", button.dataset.value === value);
-  });
-}
-
-function syncReviewChoices() {
-  setReviewChoice("completion", reviewDraft.completion || "medium");
-  setReviewChoice("focus", reviewDraft.focus || "normal");
-  setReviewChoice("interruption", reviewDraft.interruption || "none");
-}
-
 function describeReviewRecord(record) {
   if (!record) return "暂无待评价记录";
   const start = new Date(record.start);
@@ -856,19 +827,13 @@ async function openReviewPanel() {
   }
 
   activeReviewRecordId = record.id;
-  reviewDraft = {
-    completion: record.completion || "medium",
-    focus: record.focus || "normal",
-    interruption: record.interruption || "none",
-  };
-
   pip.reviewRecordMeta.textContent = describeReviewRecord(record);
   pip.reviewNote.value = record.reviewNote || "";
   pip.surface.classList.add("review-open");
   if (pip.reviewScroll) {
     pip.reviewScroll.scrollTop = 0;
   }
-  syncReviewChoices();
+  pip.reviewNote.focus();
   showControls();
 }
 
@@ -894,9 +859,6 @@ async function saveReviewPanel(skip = false) {
     if (skip) {
       record.reviewSkipped = true;
     } else {
-      record.completion = reviewDraft.completion || "medium";
-      record.focus = reviewDraft.focus || "normal";
-      record.interruption = reviewDraft.interruption || "none";
       record.reviewNote = String(pip.reviewNote.value || "").trim();
       record.reviewSkipped = false;
     }
@@ -2366,37 +2328,10 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
       <section class="review-modal" id="reviewModal" aria-label="work review">
         <div class="review-card">
           <div class="review-scroll" id="reviewScroll">
-            <p class="prompt-title">工作评价</p>
+            <p class="prompt-title">完成情况</p>
             <div class="review-record" id="reviewRecordMeta">暂无待评价记录</div>
 
-            <div class="review-group">
-              <p class="review-label">完成度</p>
-              <div class="review-options" data-review-group="completion">
-                <button class="review-choice" type="button" data-value="low">低</button>
-                <button class="review-choice" type="button" data-value="medium">中</button>
-                <button class="review-choice" type="button" data-value="high">高</button>
-              </div>
-            </div>
-
-            <div class="review-group">
-              <p class="review-label">专注度</p>
-              <div class="review-options" data-review-group="focus">
-                <button class="review-choice" type="button" data-value="poor">差</button>
-                <button class="review-choice" type="button" data-value="normal">一般</button>
-                <button class="review-choice" type="button" data-value="good">好</button>
-              </div>
-            </div>
-
-            <div class="review-group">
-              <p class="review-label">打断情况</p>
-              <div class="review-options" data-review-group="interruption">
-                <button class="review-choice" type="button" data-value="none">无</button>
-                <button class="review-choice" type="button" data-value="light">轻微</button>
-                <button class="review-choice" type="button" data-value="severe">严重</button>
-              </div>
-            </div>
-
-            <textarea class="review-note" id="reviewNote" placeholder="评价备注，可不填"></textarea>
+            <textarea class="review-note" id="reviewNote" aria-label="完成情况" placeholder="记录实际完成的内容"></textarea>
           </div>
 
           <div class="prompt-actions">
@@ -2675,16 +2610,6 @@ function bindPipEvents() {
 
   pip.reviewModal.addEventListener("click", (event) => {
     event.stopPropagation();
-  });
-
-  pip.reviewModal.querySelectorAll(".review-choice").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const group = button.closest("[data-review-group]")?.dataset.reviewGroup;
-      if (group) {
-        setReviewChoice(group, button.dataset.value);
-      }
-    });
   });
 
   pip.reviewSave.addEventListener("click", (event) => {

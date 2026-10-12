@@ -53,7 +53,6 @@
     todoEstimate: document.getElementById("notionTodoEstimate"),
     todoDetails: document.getElementById("notionTodoDetails"),
     todoEditorStart: document.getElementById("notionTodoEditorStart"),
-    todoEditorNotion: document.getElementById("notionTodoEditorNotion"),
     cancelTodo: document.getElementById("notionCancelTodo"),
     todoEditorClose: document.getElementById("notionTodoEditorClose"),
     todoAdjustment: document.getElementById("notionTodoAdjustment"),
@@ -77,7 +76,6 @@
     adjustPhase: document.getElementById("notionAdjustPhase"),
     phaseSummary: document.getElementById("notionPhaseSummary"),
     profileForm: document.getElementById("notionProfileForm"),
-    profileLink: document.getElementById("notionProfileLink"),
     profileTimezone: document.getElementById("notionProfileTimezone"),
     workWindows: document.getElementById("notionWorkWindows"),
     routineBlocks: document.getElementById("notionRoutineBlocks"),
@@ -1327,7 +1325,7 @@
       const current = plan.startDate <= today && today <= plan.endDate && plan.status !== "completed";
       const statusLabel = current ? "进行中" : plan.status === "completed" || plan.endDate < today ? "已结束" : "未开始";
       return `
-        <article class="phase-database-card${current ? " is-current" : ""}" data-phase-page-id="${escapeNotionHtml(plan.id)}">
+        <article class="phase-database-card${current ? " is-current" : ""}" data-phase-page-id="${escapeNotionHtml(plan.id)}" data-notion-url="${escapeNotionHtml(plan.url || "")}">
           <header>
             <div><span>${escapeNotionHtml(statusLabel)}</span><h3>${escapeNotionHtml(plan.title || "阶段计划")}</h3></div>
             <time>${escapeNotionHtml(plan.startDate)} → ${escapeNotionHtml(plan.endDate)}</time>
@@ -1338,7 +1336,6 @@
             <button class="ghost" type="button" data-phase-db-detail>查看详情</button>
             <button class="ghost" type="button" data-phase-db-edit>编辑</button>
             <button class="danger" type="button" data-phase-db-delete>删除</button>
-            ${plan.url ? `<a class="flow-notion-link" href="${escapeNotionHtml(plan.url)}" target="_blank" rel="noreferrer">在 Notion 中查看</a>` : ""}
           </div>
           <div class="phase-database-detail hidden">
             <section class="phase-detail-section">
@@ -1511,11 +1508,10 @@
       const priority = ({ high: "高", medium: "中", low: "低" })[todo.priority] || "中";
       const status = ({ pending: "待开始", in_progress: "进行中", done: "已完成" })[todo.status] || todo.status;
       return `
-        <article class="flow-todo-item" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}">
+        <article class="flow-todo-item" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}" data-notion-url="${escapeNotionHtml(todo.url || "")}">
           <strong>${escapeNotionHtml(todo.title)}${todo.pendingSync ? '<span class="pending-sync-badge">待同步</span>' : ""}</strong>
           <small>${escapeNotionHtml(formatTodoSchedule(todo))} · ${priority}优先级 · ${escapeNotionHtml(status)} · 预计 ${todo.estimatedPomodoros || "—"} 个番茄</small>
           <div class="flow-todo-actions">
-            ${todo.url ? `<a class="flow-notion-link" href="${escapeNotionHtml(todo.url)}" target="_blank" rel="noreferrer">在 Notion 中查看</a>` : ""}
             <button type="button" data-flow-action="start-todo" data-todo-id="${escapeNotionHtml(todo.id)}">开始</button>
             <button type="button" data-flow-action="edit-todo" data-todo-id="${escapeNotionHtml(todo.id)}">编辑</button>
             ${todo.status !== "done" ? `<button type="button" data-flow-action="done-todo" data-todo-id="${escapeNotionHtml(todo.id)}">完成</button>` : ""}
@@ -1535,14 +1531,15 @@
       ["问题分析", review.problemAnalysis],
       ["次日关注", review.nextFocus],
     ].filter(([, value]) => value);
-    const links = [
-      review.url ? `<a class="flow-notion-link" href="${escapeNotionHtml(review.url)}" target="_blank" rel="noreferrer">查看日报属性</a>` : "",
-      archive?.url ? `<a class="flow-notion-link" href="${escapeNotionHtml(archive.url)}" target="_blank" rel="noreferrer">查看每日归档</a>` : "",
-    ].filter(Boolean).join("");
     const html = parts.length
-      ? `${links ? `<div class="flow-review-toolbar">${links}</div>` : ""}${parts.map(([label, value]) => `<div class="flow-review-block"><strong>${label}</strong><span>${escapeNotionHtml(value)}</span></div>`).join("")}`
+      ? parts.map(([label, value]) => `<div class="flow-review-block"><strong>${label}</strong><span>${escapeNotionHtml(value)}</span></div>`).join("")
       : '<div class="flow-empty">尚未生成总结</div>';
-    for (const container of containers) container.innerHTML = html;
+    for (const container of containers) {
+      container.innerHTML = html;
+      container.dataset.notionUrl = review.url || "";
+      container.dataset.notionArchiveUrl = archive?.url || "";
+    }
+    for (const textarea of flowElements(dateKey, "completion")) textarea.dataset.notionUrl = review.url || "";
     for (const archiveButton of flowCards(dateKey).map((card) => card.querySelector('[data-flow-action="update-archive"]')).filter(Boolean)) {
       archiveButton.disabled = !review.dailySummary || !archiveConfigured;
       delete archiveButton.dataset.disabledBeforeOperation;
@@ -1683,14 +1680,13 @@
       const priorityLabel = ({ high: "高", medium: "中", low: "低" })[todo.priority] || "中";
       const statusLabel = ({ pending: "待开始", in_progress: "进行中", done: "已完成" })[todo.status] || todo.status;
       return `
-        <article class="notion-todo-item" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}">
+        <article class="notion-todo-item" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}" data-notion-url="${escapeNotionHtml(todo.url || "")}">
           <div class="notion-todo-copy">
             <strong>${escapeNotionHtml(todo.title)}</strong>
             ${todo.details ? `<small>${escapeNotionHtml(todo.details)}</small>` : ""}
             <span>${priorityLabel}优先级 · ${escapeNotionHtml(statusLabel)} · ${formatTodoSchedule(todo)} · 预计 ${todo.estimatedPomodoros || "—"} 个番茄 · 已投入 ${todo.actualMinutes || 0} 分钟</span>
           </div>
           <div class="notion-todo-actions">
-            <a href="${escapeNotionHtml(todo.url || "#")}" target="_blank" rel="noreferrer">Notion</a>
             <button class="ghost notion-edit-todo" type="button" data-todo-id="${escapeNotionHtml(todo.id)}">编辑</button>
             ${todo.status !== "done" ? `<button class="ghost notion-done-todo" type="button" data-todo-id="${escapeNotionHtml(todo.id)}">完成</button>` : ""}
             <button class="ghost notion-delete-todo" type="button" data-todo-id="${escapeNotionHtml(todo.id)}">删除</button>
@@ -1747,10 +1743,9 @@
     const today = notionDateKey(new Date());
     const dayMilestone = milestones.find((item) => item.date === today);
     elements.weeklyPlanView.innerHTML = `
-      <article class="notion-weekly-plan-card">
+      <article class="notion-weekly-plan-card" data-notion-url="${escapeNotionHtml(plan.url || "")}">
         <div class="phase-plan-card-head">
           <div><strong>${escapeNotionHtml(plan.title || "阶段计划")}</strong><span>${escapeNotionHtml(plan.startDate)} → ${escapeNotionHtml(plan.endDate)}</span></div>
-          ${plan.url ? `<a href="${escapeNotionHtml(plan.url)}" target="_blank" rel="noreferrer">在 Notion 中查看</a>` : ""}
         </div>
         <div class="phase-plan-breakdown phase-plan-primary">
           <small>${escapeNotionHtml(today)} · 今日阶段计划</small>
@@ -1862,11 +1857,7 @@
       elements.todoEditorStart.classList.toggle("hidden", !todo);
       elements.todoEditorStart.dataset.todoId = todo?.id || "";
     }
-    if (elements.todoEditorNotion) {
-      elements.todoEditorNotion.classList.toggle("hidden", !todo?.url);
-      if (todo?.url) elements.todoEditorNotion.href = todo.url;
-      else elements.todoEditorNotion.removeAttribute("href");
-    }
+    elements.todoEditor.dataset.notionUrl = todo?.url || "";
     document.getElementById("notionTodoEditorTitle").textContent = todo ? "编辑待办" : "新增待办";
     todoEditorOverlay?.classList.remove("hidden");
     document.body.classList.add("todo-editor-open");
@@ -1882,8 +1873,7 @@
     elements.todoId.value = "";
     elements.todoEditorStart?.classList.add("hidden");
     if (elements.todoEditorStart) elements.todoEditorStart.dataset.todoId = "";
-    elements.todoEditorNotion?.classList.add("hidden");
-    elements.todoEditorNotion?.removeAttribute("href");
+    delete elements.todoEditor.dataset.notionUrl;
   }
 
   async function startTodoFromEditor() {
@@ -2321,10 +2311,7 @@
       elements.profileWorkMinutes.value = profile.pomodoroSettings?.workMinutes || 25;
       elements.profileBreakMinutes.value = profile.pomodoroSettings?.breakMinutes || 5;
       elements.preferenceNote.value = profile.preferenceNote || "";
-      if (elements.profileLink) {
-        elements.profileLink.href = profile.url || "";
-        elements.profileLink.classList.toggle("hidden", !profile.url);
-      }
+      elements.profileForm.dataset.notionUrl = profile.url || "";
     } catch (error) {
       if (!silent) throw error;
       console.warn("Unable to load planning profile", error);

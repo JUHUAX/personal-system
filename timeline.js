@@ -52,6 +52,8 @@ const addTimelineTypeBtn = document.getElementById("addTimelineTypeBtn");
 const gridAutoFillToggle = document.getElementById("gridAutoFillToggle");
 const weekFlowGrid = document.getElementById("weekFlowGrid");
 const inspirationBoard = document.getElementById("inspirationBoard");
+const inspirationNotebook = document.getElementById("inspirationNotebook");
+const inspirationNotebookStatus = document.getElementById("inspirationNotebookStatus");
 const summary = document.getElementById("summary");
 const summarySidebar = document.getElementById("summarySidebar");
 const summaryCollapseBtn = document.getElementById("summaryCollapseBtn");
@@ -80,11 +82,7 @@ const recordType = document.getElementById("recordType");
 const recordContent = document.getElementById("recordContent");
 const recordStart = document.getElementById("recordStart");
 const recordEnd = document.getElementById("recordEnd");
-const recordRound = document.getElementById("recordRound");
 const recordReviewFields = document.getElementById("recordReviewFields");
-const recordCompletion = document.getElementById("recordCompletion");
-const recordFocus = document.getElementById("recordFocus");
-const recordInterruption = document.getElementById("recordInterruption");
 const recordReviewNote = document.getElementById("recordReviewNote");
 const editorTitle = document.getElementById("editorTitle");
 const clearFormBtn = document.getElementById("clearFormBtn");
@@ -128,7 +126,13 @@ let lastHistoryMode = "grid";
 let todayFocusPending = true;
 let historyTodayFocusRequest = 0;
 let timelineStorageRefreshTimer = null;
-let inspirationSaveTimer = null;
+const inspirationSaveTimers = new Map();
+const dirtyInspirationDates = new Set();
+let inspirationWrites = Promise.resolve();
+let notebookSaveTimer = null;
+let notebookDate = "";
+let notebookDirty = false;
+let notebookProtectedDates = [];
 let activeTimePickerInput = null;
 let selectedPickerHour = 9;
 let selectedPickerMinute = 0;
@@ -147,7 +151,14 @@ function init() {
   refreshBtn.addEventListener("click", refreshCurrentView);
   weekFlowGrid.addEventListener("click", handleFlowRecordClick);
   weekFlowGrid.addEventListener("input", handleFlowInspirationInput);
-  inspirationBoard?.addEventListener("input", handleFlowInspirationInput);
+  inspirationNotebook?.addEventListener("input", handleNotebookInput);
+  inspirationNotebook?.addEventListener("focus", refreshNotebookDate);
+  inspirationNotebook?.addEventListener("blur", () => { if (!notebookDirty) renderInspirations(); });
+  window.setInterval(refreshNotebookDate, 30000);
+  window.addEventListener("minimal-pomodoro-notion-contextmenu", hideTimelineContextMenu);
+  window.addEventListener("beforeunload", (event) => {
+    if (notebookDirty || dirtyInspirationDates.size) { event.preventDefault(); event.returnValue = ""; }
+  });
 
   prevWeekBtn.addEventListener("click", () => {
     focusNowAfterRender = false;
@@ -267,7 +278,8 @@ function init() {
   loadGridAutoFillSetting();
   window.setInterval(updateCurrentTimeIndicator, 30 * 1000);
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !Object.keys(changes).some((key) => key.startsWith("minimalPomodoroTimeline:"))) return;
+    if (areaName !== "local" || !Object.keys(changes).some((key) => key.startsWith("minimalPomodoroTimeline:") ||
+      key.startsWith("minimalPomodoroInspirations:") && !notebookDirty && !dirtyInspirationDates.size)) return;
     window.clearTimeout(timelineStorageRefreshTimer);
     timelineStorageRefreshTimer = window.setTimeout(() => {
       loadRecords({ planningRemote: false }).catch((error) => console.warn("Unable to refresh local timeline", error));
@@ -570,8 +582,7 @@ async function loadRecords(options = {}) {
   const requestSequence = ++loadRequestSequence;
   const keys = weekDateKeys();
   const storageKeys = keys.map((key) => timelineStorageKey(key));
-  const inspirationKeys = keys.map((key) => inspirationStorageKey(key));
-  const result = await chrome.storage.local.get([...storageKeys, ...inspirationKeys]);
+  const result = await chrome.storage.local.get(storageKeys);
   if (requestSequence !== loadRequestSequence) return;
 
   records = [];
@@ -581,12 +592,6 @@ async function loadRecords(options = {}) {
     for (const record of dayRecords) {
       records.push({ ...record, dateKey });
     }
-  }
-
-  inspirationsByDate = {};
-  for (const dateKey of keys) {
-    const stored = result[inspirationStorageKey(dateKey)];
-    inspirationsByDate[dateKey] = normalizeInspirationText(stored);
   }
 
   const hadLegacyAutoFilledRecords = records.some((record) => record.autoFilled);
@@ -613,6 +618,14 @@ async function persistWeekRecords() {
 async function loadHistoricalRecords() {
   const result = await chrome.storage.local.get(null);
   const history = [];
+  const loadedInspirations = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (!key.startsWith("minimalPomodoroInspirations:")) continue;
+    const date = key.slice("minimalPomodoroInspirations:".length);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) loadedInspirations[date] = String(value || "");
+  }
+  for (const date of dirtyInspirationDates) loadedInspirations[date] = inspirationsByDate[date];
+  inspirationsByDate = loadedInspirations;
 
   for (const [storageKey, dayRecords] of Object.entries(result)) {
     if (!storageKey.startsWith("minimalPomodoroTimeline:") || !Array.isArray(dayRecords)) {
@@ -820,7 +833,7 @@ function renderHeader() {
   dateText.textContent = recordsMode.classList.contains("active") && lastHistoryMode === "phases"
     ? "集中管理 Notion 中的全部阶段计划"
     : recordsMode.classList.contains("active") && lastHistoryMode === "inspiration"
-      ? `按周汇总每日灵感 · ${formatDate(first)} - ${formatDate(last)}`
+      ? `灵感草稿本 · ${todayKey()}`
       : `${formatDate(first)} - ${formatDate(last)}`;
   thisWeekBtn.classList.toggle("active", isSameWeek(currentWeekStart, new Date()));
   nowBtn.classList.toggle("active", isSameWeek(currentWeekStart, new Date()));
@@ -1700,7 +1713,6 @@ function openNewRecordFromGrid(dateKey, startMinutes, endMinutes) {
   recordContent.value = "";
   recordStart.value = minutesToTimeValue(startMinutes);
   recordEnd.value = minutesToTimeValue(endMinutes);
-  recordRound.value = "";
   deleteEditingBtn.disabled = true;
 
   renderList();
@@ -1804,28 +1816,74 @@ function flowDayCardHtml(date, displayRecords, extraClass = "") {
 }
 
 function renderInspirations() {
-  if (!inspirationBoard) return;
-  const days = weekDates();
-  const cards = days.map((date) => {
-    const dateKey = toDateKey(date);
-    const text = normalizeInspirationText(inspirationsByDate[dateKey]);
-    const lines = splitInspirationLines(text);
-    return `
-      <article class="inspiration-card${text ? "" : " is-empty"}" data-flow-date="${escapeHtml(dateKey)}">
-        <header>
-          <div><span>${escapeHtml(weekdayName(date))}</span><strong>${escapeHtml(formatMonthDay(date))}</strong></div>
-          <time>${escapeHtml(dateKey)}</time>
-        </header>
-        <textarea data-flow-role="inspiration" data-date-key="${escapeHtml(dateKey)}" rows="5" placeholder="今天有什么新想法？">${escapeHtml(text)}</textarea>
-        <div class="inspiration-preview">
-          ${lines.length
-            ? `<ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-            : '<div class="flow-empty">这一天还没有灵感记录</div>'}
-        </div>
-        <small class="flow-save-state" data-flow-role="inspiration-status" data-state="idle" role="status" aria-live="polite">自动保存</small>
-      </article>`;
-  }).join("");
-  inspirationBoard.innerHTML = cards;
+  if (!inspirationNotebook) return;
+  refreshNotebookDate();
+  if (notebookDirty || document.activeElement === inspirationNotebook) return;
+  notebookDate = todayKey();
+  inspirationNotebook.value = InspirationNotebook.serialize(inspirationsByDate, notebookDate);
+  notebookProtectedDates = Object.keys(inspirationsByDate).filter((date) =>
+    date !== notebookDate && String(inspirationsByDate[date] || "").trim());
+}
+
+function refreshNotebookDate() {
+  const currentDate = todayKey();
+  if (!inspirationNotebook || !notebookDate || notebookDate === currentDate) return;
+  try {
+    InspirationNotebook.parse(inspirationNotebook.value, notebookDate, notebookProtectedDates);
+    inspirationNotebook.value = InspirationNotebook.rollover(inspirationNotebook.value, notebookDate, currentDate);
+    notebookDate = currentDate;
+    notebookProtectedDates = Object.keys(inspirationsByDate).filter((date) =>
+      date !== currentDate && String(inspirationsByDate[date] || "").trim());
+    if (notebookDirty) handleNotebookInput();
+    if (lastHistoryMode === "inspiration") renderHeader();
+  } catch (error) { setNotebookStatus("error", error.message); }
+}
+
+function setNotebookStatus(state, text) {
+  inspirationNotebookStatus.dataset.state = state;
+  inspirationNotebookStatus.textContent = text;
+}
+
+function handleNotebookInput() {
+  notebookDirty = true;
+  clearTimeout(notebookSaveTimer);
+  try {
+    const next = InspirationNotebook.parse(inspirationNotebook.value, notebookDate, notebookProtectedDates);
+    for (const date of new Set([...Object.keys(inspirationsByDate), ...Object.keys(next)])) {
+      const value = next[date] || "";
+      if (String(inspirationsByDate[date] || "") === value) continue;
+      inspirationsByDate[date] = value;
+      dirtyInspirationDates.add(date);
+      updateInspirationTextareas(date, value);
+    }
+    setNotebookStatus("dirty", "正在保存…");
+    notebookSaveTimer = setTimeout(saveNotebook, 350);
+  } catch (error) { setNotebookStatus("error", error.message); }
+}
+
+async function persistInspirations(changes) {
+  const task = inspirationWrites.catch(() => {}).then(async () => {
+    const current = Object.entries(changes).filter(([date, value]) => inspirationsByDate[date] === value);
+    const payload = Object.fromEntries(current.map(([date, value]) => [inspirationStorageKey(date), value]));
+    if (Object.keys(payload).length) await chrome.storage.local.set(payload);
+    for (const [date, value] of current) {
+      if (inspirationsByDate[date] === value) dirtyInspirationDates.delete(date);
+    }
+  });
+  inspirationWrites = task;
+  return task;
+}
+
+async function saveNotebook() {
+  const submitted = inspirationNotebook.value;
+  const changes = Object.fromEntries([...dirtyInspirationDates].map((date) => [date, inspirationsByDate[date] || ""]));
+  try {
+    await persistInspirations(changes);
+    if (inspirationNotebook.value === submitted) notebookDirty = false;
+    setNotebookStatus(notebookDirty ? "dirty" : "saved", notebookDirty ? "正在保存…" : "已自动保存");
+    notebookProtectedDates = Object.keys(inspirationsByDate).filter((date) =>
+      date !== notebookDate && String(inspirationsByDate[date] || "").trim());
+  } catch (error) { setNotebookStatus("error", `${error.message || "保存失败"}；内容仍在草稿本中`); }
 }
 
 function handleFlowInspirationInput(event) {
@@ -1833,19 +1891,21 @@ function handleFlowInspirationInput(event) {
   if (!input) return;
   const dateKey = input.dataset.dateKey;
   inspirationsByDate[dateKey] = input.value;
+  dirtyInspirationDates.add(dateKey);
   setInspirationSaveState(dateKey, "dirty", "正在保存…");
-  clearTimeout(inspirationSaveTimer);
-  inspirationSaveTimer = setTimeout(() => saveInspiration(dateKey, input.value), 350);
+  clearTimeout(inspirationSaveTimers.get(dateKey));
+  const value = input.value;
+  inspirationSaveTimers.set(dateKey, setTimeout(() => saveInspiration(dateKey, value), 350));
 }
 
 async function saveInspiration(dateKey, text) {
-  const value = normalizeInspirationText(text);
+  const value = String(text || "");
   try {
-    await chrome.storage.local.set({ [inspirationStorageKey(dateKey)]: value });
-    inspirationsByDate[dateKey] = value;
+    await persistInspirations({ [dateKey]: value });
+    if (inspirationsByDate[dateKey] !== value) return;
     setInspirationSaveState(dateKey, "saved", "已自动保存");
     updateInspirationTextareas(dateKey, value);
-    updateInspirationPreview(dateKey, value);
+    renderInspirations();
   } catch (error) {
     setInspirationSaveState(dateKey, "error", error?.message || "保存失败");
   }
@@ -1862,26 +1922,6 @@ function updateInspirationTextareas(dateKey, value) {
   for (const textarea of document.querySelectorAll(`textarea[data-flow-role="inspiration"][data-date-key="${CSS.escape(dateKey)}"]`)) {
     if (document.activeElement !== textarea) textarea.value = value;
   }
-}
-
-function updateInspirationPreview(dateKey, value) {
-  const card = inspirationBoard?.querySelector(`.inspiration-card[data-flow-date="${CSS.escape(dateKey)}"]`);
-  if (!card) return;
-  const lines = splitInspirationLines(value);
-  card.classList.toggle("is-empty", !normalizeInspirationText(value));
-  const preview = card.querySelector(".inspiration-preview");
-  if (!preview) return;
-  preview.innerHTML = lines.length
-    ? `<ul>${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-    : '<div class="flow-empty">这一天还没有灵感记录</div>';
-}
-
-function splitInspirationLines(text) {
-  return normalizeInspirationText(text)
-    .split(/\n+/)
-    .map((line) => line.replace(/^[-*]\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 8);
 }
 
 function renderToday() {
@@ -2148,6 +2188,7 @@ function setMode(mode) {
   document.body.classList.toggle("today-page-active", today);
   document.body.classList.toggle("history-page-active", history);
   document.body.classList.toggle("phase-plans-page-active", phases);
+  document.body.classList.toggle("inspiration-page-active", inspiration);
 
   if (history) lastHistoryMode = mode;
 
@@ -2239,16 +2280,16 @@ async function saveFormRecord(event) {
     note: "",
     start,
     end,
-    round: recordRound.value ? Number(recordRound.value) : null,
+    round: existingRecord?.round || null,
     reviewPending: recordType.value === "work"
-      ? Boolean(existingRecord?.reviewPending && !recordCompletion.value && !recordFocus.value && !recordInterruption.value && !recordReviewNote.value.trim())
+      ? Boolean(existingRecord?.reviewPending && !recordReviewNote.value.trim())
       : existingRecord?.reviewPending,
     reviewSkipped: recordType.value === "work"
-      ? Boolean(existingRecord?.reviewSkipped && !recordCompletion.value && !recordFocus.value && !recordInterruption.value && !recordReviewNote.value.trim())
+      ? Boolean(existingRecord?.reviewSkipped && !recordReviewNote.value.trim())
       : Boolean(existingRecord?.reviewSkipped),
-    completion: recordType.value === "work" ? recordCompletion.value : (existingRecord?.completion || ""),
-    focus: recordType.value === "work" ? recordFocus.value : (existingRecord?.focus || ""),
-    interruption: recordType.value === "work" ? recordInterruption.value : (existingRecord?.interruption || ""),
+    completion: existingRecord?.completion || "",
+    focus: existingRecord?.focus || "",
+    interruption: existingRecord?.interruption || "",
     reviewNote: recordType.value === "work" ? recordReviewNote.value.trim() : (existingRecord?.reviewNote || ""),
     completedNaturally: existingRecord?.completedNaturally,
     completionReason: existingRecord?.completionReason || "",
@@ -2372,10 +2413,6 @@ function fillForm(dateKey, id) {
   recordContent.value = record.content || "";
   recordStart.value = timestampToTime(record.start);
   recordEnd.value = timestampToTime(record.end || record.start);
-  recordRound.value = record.round || "";
-  recordCompletion.value = record.completion || "";
-  recordFocus.value = record.focus || "";
-  recordInterruption.value = record.interruption || "";
   recordReviewNote.value = record.reviewNote || "";
   syncRecordReviewFieldVisibility();
   deleteEditingBtn.disabled = false;
@@ -2396,10 +2433,6 @@ function resetForm() {
   recordContent.value = "";
   recordStart.value = timestampToTime(Date.now());
   recordEnd.value = timestampToTime(Date.now() + 25 * 60 * 1000);
-  recordRound.value = "";
-  recordCompletion.value = "";
-  recordFocus.value = "";
-  recordInterruption.value = "";
   recordReviewNote.value = "";
   syncRecordReviewFieldVisibility();
   deleteEditingBtn.disabled = true;
@@ -3403,19 +3436,7 @@ function reviewTooltipHtml(record) {
     return `<div class="tooltip-note">评价：已跳过</div>`;
   }
 
-  const parts = [];
-  if (record.completion) parts.push(`完成度 ${reviewLabel("completion", record.completion)}`);
-  if (record.focus) parts.push(`专注度 ${reviewLabel("focus", record.focus)}`);
-  if (record.interruption) parts.push(`打断 ${reviewLabel("interruption", record.interruption)}`);
-
-  if (!parts.length && !record.reviewNote) return "";
-
-  return `
-    <div class="tooltip-note">
-      评价：${escapeHtml(parts.join(" · ") || "已评价")}
-      ${record.reviewNote ? `<br>完成情况：${escapeHtml(record.reviewNote)}` : ""}
-    </div>
-  `;
+  return record.reviewNote ? `<div class="tooltip-note">完成情况：${escapeHtml(record.reviewNote)}</div>` : "";
 }
 
 function reviewLabel(group, value) {
@@ -3490,7 +3511,6 @@ function showTimelineTooltip(event, record) {
       <span class="tooltip-label">时间</span><span>${escapeHtml(formatTime(start))} - ${escapeHtml(formatTime(end))}</span>
       <span class="tooltip-label">时长</span><span>${escapeHtml(formatDuration(minutes))}</span>
       ${mergedCount > 1 ? `<span class="tooltip-label">连续番茄</span><span>${escapeHtml(String(mergedCount))} 个</span>` : ""}
-      ${record.round ? `<span class="tooltip-label">轮次</span><span>第 ${escapeHtml(record.round)} 轮</span>` : ""}
     </div>
     ${interruptionHtml}
     ${mergedTimelineHtml}
@@ -3778,12 +3798,7 @@ function getReviewText(record) {
   if (record.reviewPending === true && record.end) return "待评价";
   if (record.reviewSkipped) return "已跳过";
 
-  const parts = [];
-  if (record.completion) parts.push(`完成度${reviewLabel("completion", record.completion)}`);
-  if (record.focus) parts.push(`专注度${reviewLabel("focus", record.focus)}`);
-  if (record.interruption) parts.push(`打断${reviewLabel("interruption", record.interruption)}`);
-  if (record.reviewNote) parts.push(`完成情况：${record.reviewNote}`);
-  return parts.join("，");
+  return record.reviewNote ? `完成情况：${record.reviewNote}` : "";
 }
 
 function typeName(type) {

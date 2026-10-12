@@ -1519,92 +1519,50 @@ pre {
 }
 
 .inspiration-board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 14px;
-}
-
-.inspiration-card {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-width: 0;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-left: 3px solid #91cda5;
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: var(--shadow-card);
-}
-
-.inspiration-card.is-empty {
-  border-left-color: rgba(255,255,255,0.22);
-}
-
-.inspiration-card header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.inspiration-card header div {
-  display: grid;
-  gap: 3px;
-}
-
-.inspiration-card header span,
-.inspiration-card time {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.inspiration-card header strong {
-  color: var(--text);
-  font-size: 18px;
-}
-
-.inspiration-card textarea {
-  width: 100%;
-  min-height: 116px;
-  padding: 11px;
-  resize: vertical;
-  border: 1px solid rgba(145, 205, 165, 0.22);
-  border-radius: 9px;
-  outline: none;
-  color: var(--text);
-  background: #0b0f14;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.inspiration-card textarea:focus {
-  border-color: rgba(145, 205, 165, 0.56);
-  box-shadow: 0 0 0 3px rgba(145, 205, 165, 0.10);
-}
-
-.inspiration-preview {
-  display: grid;
-  gap: 8px;
-}
-
-.inspiration-preview ul {
-  display: grid;
-  gap: 7px;
-  margin: 0;
   padding: 0;
-  list-style: none;
 }
 
-.inspiration-preview li {
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: rgba(232,244,255,0.84);
-  background: rgba(255,255,255,0.04);
-  font-size: 12px;
-  line-height: 1.55;
+.inspiration-notebook-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
+
+.inspiration-notebook-head h2 { margin: 0; font-size: 18px; }
+#inspirationNotebookStatus { color: var(--muted); font-size: 12px; }
+#inspirationNotebookStatus[data-state="error"] { color: #f29aa6; }
+#inspirationNotebook {
+  width: 100%;
+  min-height: 65vh;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.9;
+  letter-spacing: 0;
+  tab-size: 4;
+}
+#inspirationNotebook:focus-visible { outline: 2px solid #91cda5; outline-offset: 2px; }
+body.inspiration-page-active .week-navigation { display: none; }
+body.inspiration-page-active #summary,
+body.inspiration-page-active #calendarProgress { display: none; }
+.notion-context-menu { min-width: 180px; max-width: calc(100vw - 16px); }
+.notion-context-menu button { white-space: normal; }
+@media (max-width: 600px) {
+  #inspirationNotebook { padding: 14px; }
+  .inspiration-notebook-head { flex-wrap: wrap; }
+}
+
 
 .flow-todo-item {
   display: grid;
