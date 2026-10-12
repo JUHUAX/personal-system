@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>极简番茄钟</title>
+  <link rel="stylesheet" href="timeline.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <p class="kicker">Minimal Pomodoro</p>
+        <h1 id="pageTitle">本周番茄钟时间轴</h1>
+        <p class="date" id="dateText"></p>
+      </div>
+      <div class="header-controls">
+        <button class="notion-queue-chip hidden" id="notionQueueChip" type="button" data-state="pending" aria-live="polite" title="点击立即把本地待同步修改写入 Notion">
+          <span class="notion-queue-chip-dot" aria-hidden="true"></span>
+          <span id="notionQueueChipText">1 项待同步</span>
+        </button>
+        <button class="llm-task-chip hidden" id="llmTaskChip" type="button" data-state="working" aria-live="polite">
+          <span class="llm-task-chip-dot" aria-hidden="true"></span>
+          <span id="llmTaskChipText">LLM 正在处理</span>
+          <time id="llmTaskChipElapsed">0 秒</time>
+        </button>
+        <nav class="actions mode-navigation" aria-label="页面导航">
+          <button class="seg active" id="todayMode">今日</button>
+          <button class="seg" id="recordsMode">时间记录</button>
+          <button class="seg" id="summaryMode">统计</button>
+          <button class="seg notion-mode-button" id="notionMode">配置</button>
+        </nav>
+        <nav class="actions week-navigation" aria-label="日期导航">
+          <button class="seg" id="prevWeekBtn">上一周</button>
+          <button class="seg active" id="thisWeekBtn">本周</button>
+          <button class="seg" id="nextWeekBtn">下一周</button>
+          <button class="seg now-action" id="nowBtn">回到现在</button>
+          <button class="seg refresh-action" id="refreshBtn" title="刷新当前页面数据" aria-label="刷新当前页面数据"><span class="refresh-icon" aria-hidden="true">↻</span><span>刷新</span></button>
+        </nav>
+      </div>
+    </header>
+
+    <div class="backup-status" id="backupStatus"></div>
+
+    <section class="summary" id="summary"></section>
+
+    <section class="calendar-progress-overview" id="calendarProgress"></section>
+
+    <section class="pomodoro-view hidden" id="pomodoroView">
+      <iframe
+        id="pomodoroFrame"
+        class="pomodoro-frame"
+        src="controller.html?main=1"
+        title="番茄钟"
+        allow="picture-in-picture"
+      ></iframe>
+    </section>
+
+    <section class="today-view" id="todayView">
+      <div class="today-command-bar">
+        <div class="today-day-navigation" role="group" aria-label="当天日期导航">
+          <button class="seg" id="prevDayBtn" type="button" title="前一天" aria-label="前一天">←</button>
+          <button class="seg" id="todayDayBtn" type="button">今天</button>
+          <button class="seg" id="nextDayBtn" type="button" title="后一天" aria-label="后一天">→</button>
+        </div>
+        <div class="today-primary-actions">
+          <button class="ghost" id="openFullWorkspaceBtn" type="button">完整工作台</button>
+          <button class="primary" id="startPomodoroBtn" type="button">开始番茄钟</button>
+        </div>
+      </div>
+      <div class="flow-operation-status hidden" id="todayFlowOperationStatus" data-state="idle"></div>
+      <div class="today-workspace">
+        <section class="today-panel today-block-panel">
+          <header class="today-panel-head">
+            <div><span>当天规划与真实记录</span><h2>当天时间块</h2></div>
+            <button class="grid-manage-button" id="todayManageRecordsBtn" type="button">管理记录</button>
+          </header>
+          <div class="today-grid-shell">
+            <div class="today-timeline-grid" id="todayTimelineGrid"></div>
+          </div>
+        </section>
+        <section class="today-panel today-flow-panel">
+          <header class="today-panel-head">
+            <div><span>当天执行与复盘</span><h2>当天时间流</h2></div>
+          </header>
+          <div class="today-flow-grid" id="todayFlowGrid"></div>
+        </section>
+      </div>
+      <div class="phase-plan-dock today-phase-plan-dock" id="todayPhasePlanDock"></div>
+    </section>
+
+    <section class="history-view hidden" id="historyView">
+      <div class="history-view-toolbar">
+        <div>
+          <span>多日查看与管理</span>
+          <h2>时间记录</h2>
+        </div>
+        <div class="actions history-view-switch" role="group" aria-label="时间记录视图">
+          <button class="seg active" id="historyGridMode" type="button">时间块</button>
+          <button class="seg" id="historyTextMode" type="button">时间流</button>
+          <button class="seg" id="historyInspirationMode" type="button">灵感记录</button>
+          <button class="seg" id="historyPhaseMode" type="button">阶段计划</button>
+        </div>
+      </div>
+
+    <section class="grid-view" id="gridView">
+      <div class="grid-toolbar">
+        <div class="timeline-type-filters" id="timelineTypeFilters" aria-label="筛选时间类型">
+          <span class="grid-toolbar-label">显示</span>
+          <button class="timeline-type-filter active work" type="button" data-type="work" aria-pressed="true">
+            <span class="filter-dot"></span>
+            工作
+            <span class="filter-count" data-filter-count="work">0</span>
+          </button>
+          <button class="timeline-type-filter active break" type="button" data-type="break" aria-pressed="true">
+            <span class="filter-dot"></span>
+            休息
+            <span class="filter-count" data-filter-count="break">0</span>
+          </button>
+          <button class="timeline-type-filter active life" type="button" data-type="life" aria-pressed="true">
+            <span class="filter-dot"></span>
+            生活
+            <span class="filter-count" data-filter-count="life">0</span>
+          </button>
+          <button class="timeline-type-filter active entertainment" type="button" data-type="entertainment" aria-pressed="true">
+            <span class="filter-dot"></span>
+            娱乐
+            <span class="filter-count" data-filter-count="entertainment">0</span>
+          </button>
+          <button class="timeline-type-add" id="addTimelineTypeBtn" type="button">+ 添加类型</button>
+          <label class="grid-autofill-toggle" title="仅在时间块界面用虚拟块填充真实记录之间的空白，不会保存或同步到 Notion">
+            <input id="gridAutoFillToggle" type="checkbox" checked />
+            <span>补全空白</span>
+          </label>
+        </div>
+        <div class="grid-toolbar-meta">
+          <span id="gridFilterStatus">显示全部时间块</span>
+          <span class="grid-create-hint">拖动时间块可移动；右键可复制或删除；拖动空白处可新建</span>
+          <button class="grid-manage-button" id="openSupplementRecordsBtn" type="button">补充记录</button>
+          <button class="grid-manage-button" id="openRecordManagerBtn" type="button">管理全部记录</button>
+        </div>
+      </div>
+      <div class="grid-shell">
+        <div class="week-grid" id="timelineGrid"></div>
+      </div>
+    </section>
+
+    <section class="text-view hidden" id="textView">
+      <div class="flow-operation-status hidden" id="flowOperationStatus" data-state="idle"></div>
+      <div class="week-flow-shell">
+        <div class="week-flow-grid" id="weekFlowGrid"></div>
+      </div>
+    </section>
+
+    <section class="inspiration-view hidden" id="inspirationView">
+      <div class="inspiration-board" id="inspirationBoard"></div>
+    </section>
+
+    <section class="phase-plans-view hidden" id="phasePlansView">
+      <header class="phase-plans-toolbar">
+        <div><span>Notion Phase Plan 数据库</span><h2>全部阶段计划</h2><p>在这里集中查看、新增、编辑和删除阶段计划。</p></div>
+        <button class="primary" id="phasePlansCreate" type="button">新增阶段计划</button>
+      </header>
+      <div class="flow-operation-status hidden" id="phasePlansStatus" data-state="idle"></div>
+      <div class="phase-plans-database" id="phasePlansDatabase">
+        <div class="notion-empty">正在读取阶段计划…</div>
+      </div>
+    </section>
+    </section>
+
+    <section class="summary-view hidden" id="summaryView">
+      <aside class="list-card summary-sidebar" id="summarySidebar">
+        <div class="list-head summary-sidebar-head">
+          <div>
+            <h2>文字总结</h2>
+            <span id="weekSummaryMeta"></span>
+          </div>
+          <button
+            class="summary-collapse-btn"
+            id="summaryCollapseBtn"
+            type="button"
+            aria-expanded="true"
+            aria-label="收起文字总结"
+          >收起</button>
+        </div>
+
+        <div class="summary-sidebar-content">
+          <section class="summary-text-section">
+            <h3>周总结</h3>
+            <div class="summary-detail" id="weekSummary"></div>
+          </section>
+
+          <section class="summary-text-section">
+            <div class="summary-section-head">
+              <h3>日总结</h3>
+              <span>按天统计</span>
+            </div>
+            <div class="summary-detail" id="daySummary"></div>
+          </section>
+        </div>
+      </aside>
+
+      <div class="summary-dashboard">
+        <div class="list-card dashboard-card">
+          <div class="list-head">
+            <div>
+              <h2>时间趋势</h2>
+              <span>基于真实时间记录</span>
+            </div>
+          </div>
+
+          <div class="chart-card chart-card-wide heatmap-card">
+            <div class="chart-card-head">
+              <h3>记录热力图</h3>
+              <span>最近一年</span>
+            </div>
+            <div id="activityHeatmap"></div>
+          </div>
+
+          <div class="dashboard-extra">
+            <div class="chart-card" id="dailyDurationCard">
+              <div class="chart-card-head">
+                <h3 id="dailyDurationTitle">每日时长统计</h3>
+                <span id="dailyDurationMeta"></span>
+              </div>
+              <div id="dailyDurationVisual"></div>
+            </div>
+
+            <div class="chart-card" id="bestWeekCard">
+              <h3>周概览</h3>
+              <div class="insight-combo">
+                <section class="insight-section">
+                  <h4>历史最佳周</h4>
+                  <div id="bestWeekContent"></div>
+                </section>
+                <section class="insight-section">
+                  <h4>时间组成</h4>
+                  <div id="timeCompositionChart"></div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div id="summaryCharts">
+            <div class="chart-card chart-card-wide">
+              <h3>近 6 周工作趋势</h3>
+              <div id="weeklyCompareChart" class="chart-area"></div>
+            </div>
+            <div class="chart-card chart-card-wide">
+              <h3 id="taskRankingTitle">任务投入排行</h3>
+              <div id="taskRankingChart" class="task-chart"></div>
+            </div>
+            <div class="chart-card chart-card-wide">
+              <div class="chart-card-head">
+                <h3>工作时段分布</h3>
+                <span id="workTimeDistributionMeta"></span>
+              </div>
+              <div id="workTimeDistributionChart" class="chart-area"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="notion-view hidden" id="notionView">
+      <div class="notion-hero">
+        <div>
+          <p class="kicker">Configuration</p>
+          <h2>配置</h2>
+          <p>集中配置 Notion、LLM、同步规则和个人节奏；日常计划与复盘已整合到“时间流”。</p>
+        </div>
+        <div class="notion-connection-state" id="notionConnectionState" data-state="idle">
+          <span class="notion-state-dot"></span>
+          <span id="notionConnectionText">尚未连接</span>
+        </div>
+      </div>
+
+      <div class="notion-layout">
+        <form class="notion-card notion-settings-form" id="notionSettingsForm">
+          <div class="notion-card-head">
+            <div>
+              <h3>连接设置</h3>
+              <p>支持粘贴 data source ID、database ID 或完整 Notion 链接。</p>
+            </div>
+            <span class="notion-api-version">API 2026-03-11</span>
+          </div>
+
+          <label class="notion-field notion-field-wide">
+            <span>Notion Token</span>
+            <div class="notion-secret-control">
+              <input id="notionToken" type="password" autocomplete="off" placeholder="ntn_... / secret_..." />
+              <button class="ghost notion-secret-toggle" id="notionTokenVisibility" type="button" aria-controls="notionToken" aria-pressed="false">显示</button>
+            </div>
+            <small>Token 仅保存在当前浏览器的扩展本地存储中。</small>
+          </label>
+
+          <section class="notion-setup-box">
+            <div class="notion-card-head">
+              <div>
+                <h3>初始化 Notion 工作区</h3>
+                <p>选择一个已共享给连接的父页面；插件会载入或创建阶段计划、个人节奏、每日待办、时间记录、每日复盘和每日归档。</p>
+              </div>
+              <span class="notion-step-badge">推荐首次使用</span>
+            </div>
+            <label class="notion-field notion-field-wide">
+              <span>工作区父页面</span>
+              <input id="notionWorkspaceParent" type="text" placeholder="粘贴 Notion 页面链接或页面 ID" />
+              <small>只会在这个页面下检查、升级或创建 6 个 Minimal Pomodoro 数据库，不会修改其他页面。</small>
+            </label>
+            <button class="primary notion-wide-action" id="notionInitializeWorkspace" type="button">检查并初始化工作区</button>
+            <div class="notion-workspace-result hidden" id="notionWorkspaceResult"></div>
+          </section>
+
+          <div class="notion-form-grid">
+            <label class="notion-field">
+              <span>Time Record 数据源</span>
+              <input id="notionTimeRecordSource" type="text" placeholder="必填 · 数据库链接或 ID" />
+            </label>
+            <label class="notion-field">
+              <span>Phase Plan 数据源</span>
+              <input id="notionWeeklyPlanSource" type="text" placeholder="必填 · 阶段计划" />
+            </label>
+            <label class="notion-field">
+              <span>Planning Profile 数据源</span>
+              <input id="notionPlanningProfileSource" type="text" placeholder="必填 · 个人节奏与固定安排" />
+            </label>
+            <label class="notion-field">
+              <span>Daily Todo 数据源</span>
+              <input id="notionDailyPlanSource" type="text" placeholder="必填 · LLM 生成每日待办" />
+            </label>
+            <label class="notion-field">
+              <span>Daily Review 数据源</span>
+              <input id="notionDailyReviewSource" type="text" placeholder="可选 · 写入 LLM 日报" />
+            </label>
+            <label class="notion-field">
+              <span>Daily Archive 数据源</span>
+              <input id="notionDailyArchiveSource" type="text" placeholder="可选 · 按天保存完整文档" />
+            </label>
+            <label class="notion-field">
+              <span>日报触发时间</span>
+              <input id="notionDailyReviewTime" type="time" value="22:30" />
+            </label>
+          </div>
+
+          <div class="notion-toggle-grid">
+            <label class="notion-toggle notion-help-target" tabindex="0" data-help-title="定时双向同步" data-help="按下方设定的间隔自动执行：先把保存在本地的待办、完成情况、个人节奏与真实时间记录批量写入 Notion，再拉取 Notion 中的修改。同一条内容的多次修改会合并，减少等待与 API 请求。">
+              <input id="notionAutoSync" type="checkbox" />
+              <span><strong>定时双向同步</strong><small>写入本地修改，并拉取 Notion 修改</small></span>
+            </label>
+            <label class="notion-toggle notion-help-target" tabindex="0" data-help-title="每日总结自动化" data-help="在‘日报触发时间’读取当天完成情况，生成当天总结和次日待办。未填写完成情况时不会调用 LLM。">
+              <input id="notionDailyReviewEnabled" type="checkbox" />
+              <span><strong>自动生成每日总结</strong><small>在设定时间生成总结和次日待办</small></span>
+            </label>
+            <label class="notion-toggle notion-help-target" tabindex="0" data-help-title="日内待办自动调整" data-help="每天 13:00 和 18:00 根据已记录的时间流、待办状态和阶段计划，调整当天尚未开始的剩余待办。可独立于每日总结关闭。">
+              <input id="notionIntradayAdjustmentEnabled" type="checkbox" />
+              <span><strong>自动调整日内待办</strong><small>每天 13:00、18:00 重排剩余时间</small></span>
+            </label>
+          </div>
+          <label class="notion-field notion-field-wide" id="notionSyncIntervalField">
+            <span>自动同步间隔（分钟）</span>
+            <input id="notionSyncIntervalMinutes" type="number" min="5" max="1440" step="5" value="10" />
+            <small>默认每 10 分钟批量写入本地待同步修改；也可点击页面顶部的“待同步”按钮立即写入。</small>
+          </label>
+
+          <section class="notion-llm-box">
+            <div class="notion-card-head">
+              <div>
+                <h3>LLM 配置</h3>
+                <p>插件直接调用 OpenAI-compatible Chat Completions 接口，不再需要 Cloudflare Worker。</p>
+              </div>
+            </div>
+            <div class="notion-form-grid">
+              <label class="notion-field">
+                <span>LLM 接口地址</span>
+                <input id="notionLlmEndpoint" type="url" placeholder="OpenAI-compatible Chat Completions URL" />
+              </label>
+              <label class="notion-field">
+                <span>模型 ID</span>
+                <input id="notionLlmModel" type="text" placeholder="填写服务商提供的模型 ID" />
+              </label>
+            </div>
+            <label class="notion-field notion-field-wide notion-llm-key-field">
+              <span>LLM API Key</span>
+              <div class="notion-secret-control">
+                <input id="notionLlmApiKey" type="password" autocomplete="off" placeholder="由模型服务商提供" />
+                <button class="ghost notion-secret-toggle" id="notionLlmKeyVisibility" type="button" aria-controls="notionLlmApiKey" aria-pressed="false">显示</button>
+              </div>
+              <small>密钥仅保存在当前浏览器的扩展本地存储中，通过 HTTPS 直接发送给模型服务商，不会写入 Notion。</small>
+            </label>
+          </section>
+
+          <div class="notion-actions">
+            <button class="primary" type="submit">保存设置</button>
+            <button class="ghost" id="notionTestConnection" type="button">测试连接</button>
+          </div>
+        </form>
+
+        <div class="notion-side-stack">
+          <section class="notion-card">
+            <div class="notion-card-head">
+              <div>
+                <h3>时间记录同步</h3>
+                <p id="notionSyncMeta">尚未同步</p>
+              </div>
+            </div>
+            <div class="notion-sync-actions">
+              <button class="primary" id="notionSyncWeek" type="button">同步本周</button>
+              <button class="ghost" id="notionSyncAll" type="button">同步全部</button>
+            </div>
+            <div class="notion-progress hidden" id="notionProgress">
+              <div class="notion-progress-track"><span id="notionProgressBar"></span></div>
+              <span id="notionProgressText"></span>
+            </div>
+            <div class="notion-status" id="notionStatus" data-state="idle">等待操作</div>
+          </section>
+
+          <div class="hidden" id="dailyTodoLegacyCard" aria-hidden="true">
+            <div class="notion-date-actions">
+              <input id="notionPlanDate" type="date" />
+              <button class="ghost" id="notionLoadPlan" type="button">读取待办</button>
+            </div>
+            <div class="notion-plan-list" id="notionPlanList">
+              <div class="notion-empty">尚未读取待办</div>
+            </div>
+            <button class="ghost notion-wide-action" id="notionNewTodo" type="button">新建待办</button>
+            <form class="notion-inline-editor hidden" id="notionTodoEditor">
+              <div class="todo-editor-head">
+                <div><h3 id="notionTodoEditorTitle">新增待办</h3><p><em class="notion-required">*</em> 为必填项</p></div>
+                <button class="ghost" id="notionTodoEditorClose" type="button" aria-label="关闭新增待办弹窗">关闭</button>
+              </div>
+              <input id="notionTodoId" type="hidden" />
+              <div class="notion-form-grid">
+                <label class="notion-field"><span>待办名称 <em class="notion-required">必填</em></span><input id="notionTodoTitle" required /></label>
+                <label class="notion-field"><span>优先级 <em class="notion-required">必填</em></span><select id="notionTodoPriority" required><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label>
+                <label class="notion-field"><span>计划开始 <small>选填</small></span><input id="notionTodoStart" type="time" /></label>
+                <label class="notion-field"><span>计划结束 <small>选填</small></span><input id="notionTodoEnd" type="time" /></label>
+                <label class="notion-field"><span>预计番茄数 <small>选填</small></span><input id="notionTodoEstimate" type="number" min="0" max="20" /></label>
+              </div>
+              <label class="notion-field notion-field-wide"><span>说明 <small>选填</small></span><textarea id="notionTodoDetails" rows="3"></textarea></label>
+              <div class="notion-actions">
+                <button class="primary" type="submit">保存待办</button>
+                <button class="ghost hidden" id="notionTodoEditorStart" type="button">开始番茄钟</button>
+                <a class="ghost hidden" id="notionTodoEditorNotion" target="_blank" rel="noreferrer">在 Notion 中查看</a>
+                <button class="ghost" id="notionCancelTodo" type="button">取消</button>
+              </div>
+            </form>
+            <div class="notion-adjust-box">
+              <label class="notion-field notion-field-wide"><span>让 LLM 调整当天待办</span><textarea id="notionTodoAdjustment" rows="3" placeholder="例如：下午临时开会，把深度工作提前，并减少一项低优先级任务。"></textarea></label>
+              <button class="ghost" id="notionPreviewAdjustment" type="button">预览调整</button>
+            </div>
+          </div>
+
+          <section class="notion-card" id="phasePlanCard">
+            <div class="notion-card-head">
+              <div>
+                <h3>阶段计划</h3>
+                <p>查看 LLM 拆分的每日里程碑；创建或调整时再在弹窗中填写。</p>
+              </div>
+            </div>
+            <div class="notion-weekly-plan" id="notionWeeklyPlanView">
+              <div class="notion-empty">尚未读取阶段计划</div>
+            </div>
+            <div class="phase-plan-entry-actions">
+              <button class="primary" id="notionOpenPhaseCreate" type="button">生成阶段计划</button>
+              <button class="ghost hidden" id="notionOpenPhaseAdjust" type="button">调整阶段计划</button>
+              <button class="primary hidden" id="notionSummarizePhase" type="button">生成阶段计划总结</button>
+            </div>
+            <form class="notion-inline-editor hidden" id="notionPhasePlanForm">
+              <input id="notionPhasePlanPageId" type="hidden" />
+              <div class="notion-form-grid">
+                <label class="notion-field"><span>开始日期 <em class="notion-required">必填</em></span><input id="notionPhaseStart" type="date" required /></label>
+                <label class="notion-field"><span>结束日期 <em class="notion-required">必填</em></span><input id="notionPhaseEnd" type="date" required /></label>
+              </div>
+              <label class="notion-field notion-field-wide"><span>计划描述 <em class="notion-required">必填</em></span><textarea id="notionPhaseDescription" rows="5" required placeholder="用自然语言描述目标、当前进度、期望成果和重点。"></textarea></label>
+              <label class="notion-field notion-field-wide"><span>约束与说明 <small>选填</small></span><textarea id="notionPhaseConstraints" rows="3" placeholder="截止时间、不可调整事项、强度限制等。"></textarea></label>
+              <div class="notion-actions"><button class="primary notion-wide-action" type="submit">开始生成阶段计划</button></div>
+            </form>
+            <div class="notion-adjust-box phase-adjust-box hidden">
+              <div class="phase-current-range" id="notionPhaseCurrentRange"></div>
+              <fieldset class="phase-adjust-mode-selector">
+                <legend>调整类型</legend>
+                <label><input type="radio" name="notionPhaseAdjustMode" value="replan" checked /><span>调整计划</span></label>
+                <label><input type="radio" name="notionPhaseAdjustMode" value="extend" /><span>延长时间</span></label>
+                <label><input type="radio" name="notionPhaseAdjustMode" value="shorten" /><span>提前结束</span></label>
+              </fieldset>
+              <label class="notion-field notion-field-wide hidden" id="notionPhaseAdjustedEndField"><span id="notionPhaseAdjustedEndLabel">新的结束日期</span><input id="notionPhaseAdjustedEnd" type="date" /></label>
+              <label class="notion-field notion-field-wide"><span>希望如何调整 <small>选填</small></span><textarea id="notionPhaseAdjustment" rows="5" placeholder="可说明实际变化、当前困难和期望；留空时将按当前进度自动处理。"></textarea></label>
+              <button class="primary notion-wide-action" id="notionAdjustPhase" type="button">让 LLM 调整剩余计划</button>
+            </div>
+            <div class="notion-status hidden" id="notionPhaseSummary"></div>
+          </section>
+
+          <section class="notion-card">
+            <div class="notion-card-head">
+              <div><h3>个人节奏</h3><p>LLM 排程必须遵守工作窗口并避开固定安排。</p></div>
+              <a class="notion-card-link hidden" id="notionProfileLink" target="_blank" rel="noreferrer">在 Notion 中查看</a>
+            </div>
+            <form class="notion-inline-editor" id="notionProfileForm">
+              <div class="notion-form-grid">
+                <label class="notion-field"><span>时区</span><input id="notionProfileTimezone" placeholder="Asia/Chongqing" /></label>
+                <label class="notion-field"><span>工作窗口</span><input id="notionWorkWindows" placeholder="1-5 09:00-12:00, 1-5 14:00-18:00" /></label>
+                <label class="notion-field"><span>固定/不可用安排</span><input id="notionRoutineBlocks" placeholder="1-5 12:00-14:00 午休" /></label>
+                <label class="notion-field"><span>指定日期例外</span><input id="notionDateOverrides" placeholder="2026-08-12 09:00-12:00 请假" /></label>
+                <label class="notion-field"><span>排程估算工作段（分钟）</span><input id="notionProfileWorkMinutes" type="number" min="1" max="180" value="25" /></label>
+                <label class="notion-field"><span>排程估算休息（分钟）</span><input id="notionProfileBreakMinutes" type="number" min="1" max="60" value="5" /></label>
+              </div>
+              <label class="notion-field notion-field-wide"><span>习惯说明</span><textarea id="notionPreferenceNote" rows="3" placeholder="例如：上午适合深度工作；晚上不安排高强度任务。"></textarea></label>
+              <small>星期使用 0–6（0 为周日）或范围，如 1-5；多个时间段用英文逗号分隔。估算时长只供 LLM 排程，不修改现有番茄钟计时设置。</small>
+              <button class="primary notion-wide-action" type="submit">保存个人节奏</button>
+            </form>
+          </section>
+
+          <div class="hidden" id="dailyReviewLegacyCard" aria-hidden="true">
+            <label class="notion-field notion-field-wide">
+              <span>当天完成情况 <em class="notion-required">必填</em></span>
+              <textarea id="notionDailyCompletion" rows="5" placeholder="写明完成了什么、没有完成什么、原因和需要延续的事项。"></textarea>
+            </label>
+            <div class="notion-review-actions">
+              <button class="ghost" id="notionSaveCompletion" type="button">保存完成情况</button>
+              <button class="primary" id="notionTriggerReview" type="button">生成总结与次日待办</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="manage-view record-editor-overlay hidden"
+      id="recordEditorOverlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="editorTitle"
+    >
+      <div class="editor-card">
+        <div class="editor-head">
+          <h2 id="editorTitle">新增记录</h2>
+          <div class="editor-head-actions">
+            <button class="ghost" id="clearFormBtn" type="button">新建</button>
+            <button class="ghost" id="closeRecordEditorBtn" type="button">关闭</button>
+          </div>
+        </div>
+
+        <form class="record-form" id="recordForm">
+          <input type="hidden" id="recordId" />
+          <input type="hidden" id="recordDateKey" />
+
+          <label>
+            日期
+            <input id="recordDate" type="date" />
+          </label>
+
+          <label>
+            类型
+            <select id="recordType">
+              <option value="work">工作</option>
+              <option value="break">休息</option>
+              <option value="life">生活</option>
+              <option value="entertainment">娱乐</option>
+            </select>
+          </label>
+
+          <label>
+            内容
+            <input id="recordContent" type="text" placeholder="例如：写论文 / 休息 / 接电话 / 申请访问 youtube.com" />
+          </label>
+
+          <label>
+            开始时间
+            <span class="time-input-shell">
+              <input id="recordStart" type="time" step="60" />
+              <button
+                class="time-picker-trigger"
+                type="button"
+                data-time-picker-for="recordStart"
+                aria-label="选择开始时间"
+                title="选择开始时间"
+              ><span class="clock-icon" aria-hidden="true"></span></button>
+            </span>
+          </label>
+
+          <label>
+            结束时间
+            <span class="time-input-shell">
+              <input id="recordEnd" type="time" step="60" />
+              <button
+                class="time-picker-trigger"
+                type="button"
+                data-time-picker-for="recordEnd"
+                aria-label="选择结束时间"
+                title="选择结束时间"
+              ><span class="clock-icon" aria-hidden="true"></span></button>
+            </span>
+          </label>
+
+          <label>
+            轮次
+            <input id="recordRound" type="number" min="1" max="999" placeholder="可选" />
+          </label>
+
+          <fieldset class="record-review-fields" id="recordReviewFields">
+            <legend>工作评价</legend>
+            <label>
+              完成度
+              <select id="recordCompletion">
+                <option value="">未评价</option>
+                <option value="low">低</option>
+                <option value="medium">中</option>
+                <option value="high">高</option>
+              </select>
+            </label>
+            <label>
+              专注度
+              <select id="recordFocus">
+                <option value="">未评价</option>
+                <option value="poor">差</option>
+                <option value="normal">一般</option>
+                <option value="good">好</option>
+              </select>
+            </label>
+            <label>
+              打断情况
+              <select id="recordInterruption">
+                <option value="">未评价</option>
+                <option value="none">无</option>
+                <option value="light">轻微</option>
+                <option value="severe">严重</option>
+              </select>
+            </label>
+            <label class="record-review-note-field">
+              完成情况
+              <textarea id="recordReviewNote" placeholder="可选：记录本轮实际完成的内容"></textarea>
+            </label>
+          </fieldset>
+
+          <div class="form-actions">
+            <button class="primary" id="saveRecordBtn" type="submit">保存记录</button>
+            <button class="ghost" id="startRecordPomodoroBtn" type="button" disabled>同标题开始番茄钟</button>
+            <button class="ghost" id="deleteEditingBtn" type="button" disabled>删除当前</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="list-card record-list-card">
+        <div class="list-head">
+          <h2>本周记录列表</h2>
+          <span id="recordCount"></span>
+        </div>
+        <div class="record-list" id="recordList"></div>
+      </div>
+    </section>
+
+    <section
+      class="supplement-record-overlay hidden"
+      id="supplementRecordOverlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="supplementRecordTitle"
+    >
+      <form class="supplement-record-dialog" id="supplementRecordForm">
+        <header class="supplement-record-head">
+          <div><span>自然语言补录</span><h2 id="supplementRecordTitle">补充时间记录</h2></div>
+          <button class="ghost" id="closeSupplementRecordsBtn" type="button">关闭</button>
+        </header>
+        <label class="supplement-record-field">
+          <span>补充日期</span>
+          <input id="supplementRecordDate" type="date" required />
+        </label>
+        <label class="supplement-record-field">
+          <span>当天发生了什么</span>
+          <textarea id="supplementRecordText" rows="7" required placeholder="例如：上午 9:10 到 10:00 修改论文，10:00 休息了 15 分钟；下午两点到三点半开组会。"></textarea>
+        </label>
+        <p class="supplement-record-hint">请尽量写明开始时间和结束时间，或开始时间与持续时长。</p>
+        <div class="flow-operation-status hidden" id="supplementRecordStatus" data-state="idle"></div>
+        <div class="supplement-record-actions">
+          <button class="ghost" id="cancelSupplementRecordsBtn" type="button">取消</button>
+          <button class="primary" id="submitSupplementRecordsBtn" type="submit">整理并补入</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <div class="custom-time-picker hidden" id="customTimePicker" role="dialog" aria-label="选择时间">
+    <div class="custom-time-picker-head">
+      <div><span>选择时间</span><strong id="customTimePickerValue">09:00</strong></div>
+      <button id="customTimePickerClose" type="button" aria-label="关闭时间选择器" title="关闭">×</button>
+    </div>
+    <div class="custom-time-picker-columns">
+      <section><span>小时</span><div class="custom-time-options" id="customTimePickerHours"></div></section>
+      <section><span>分钟</span><div class="custom-time-options" id="customTimePickerMinutes"></div></section>
+    </div>
+    <div class="custom-time-picker-actions">
+      <button class="ghost" id="customTimePickerNow" type="button">现在</button>
+      <button class="primary" id="customTimePickerDone" type="button">完成</button>
+    </div>
+  </div>
+
+  <div class="timeline-tooltip hidden" id="timelineTooltip"></div>
+  <div class="timeline-context-menu hidden" id="timelineContextMenu" role="menu">
+    <div class="context-menu-title" id="timelineContextMenuTitle"></div>
+    <button type="button" role="menuitem" data-action="start-pomodoro">同标题开始番茄钟</button>
+    <button type="button" role="menuitem" data-action="copy">复制时间块</button>
+    <button class="danger-action" type="button" role="menuitem" data-action="delete">删除时间块</button>
+  </div>
+
+  <script src="work-prompt-policy.js"></script>
+  <script src="notion-client.js"></script>
+  <script src="timeline.js"></script>
+  <script src="notion-integration.js"></script>
+</body>
+</html>

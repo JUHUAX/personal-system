@@ -1,0 +1,245 @@
+:root {
+  --bg: #0b0d10;
+  --panel: #11151a;
+  --text: #f2f4f7;
+  --muted: #9aa3ad;
+  --line: rgba(255,255,255,0.09);
+  --line-strong: rgba(255,255,255,0.16);
+  --accent: #78c7ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  background: #0b0d10;
+  color: var(--text);
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", Inter, system-ui, sans-serif;
+  font-size: 15px;
+}
+
+.controller {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 30px;
+}
+
+.panel {
+  width: min(720px, 100%);
+  padding: 34px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.34);
+}
+
+.kicker {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(34px, 4vw, 44px);
+  letter-spacing: -0.06em;
+  line-height: 1.02;
+}
+
+.desc {
+  margin: 18px 0 26px;
+  color: var(--muted);
+  line-height: 1.85;
+  font-size: 15px;
+  max-width: 62ch;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.launch,
+.secondary {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(120,199,255,0.26);
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(120,199,255,0.08);
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.secondary {
+  color: rgba(238,246,255,0.92);
+  background: rgba(255,255,255,0.05);
+  box-shadow: none;
+}
+
+.launch:hover,
+.secondary:hover {
+  border-color: rgba(120,199,255,0.52);
+  background: rgba(120,199,255,0.14);
+  transform: translateY(-1px);
+}
+
+.launch:focus-visible,
+.secondary:focus-visible {
+  outline: 2px solid #9bd8ff;
+  outline-offset: 3px;
+}
+
+.secondary:hover {
+  border-color: var(--line-strong);
+  background: rgba(255,255,255,0.09);
+}
+
+.status-message {
+  display: none;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(116, 213, 255, 0.22);
+  border-radius: 12px;
+  color: rgba(210,238,255,0.90);
+  background: rgba(80, 160, 255, 0.08);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.status-message.visible {
+  display: block;
+}
+
+.fallback {
+  display: none;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.76);
+  background: rgba(255,255,255,0.05);
+  font-size: 13px;
+}
+
+.fallback.visible {
+  display: block;
+}
+
+.notes {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notes span {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+}
+
+.notes {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notes span {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(133,180,255,0.14);
+  color: rgba(222,236,252,0.76);
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 26px;
+    border-radius: 22px;
+  }
+
+  .button-row {
+    flex-direction: column;
+  }
+
+  .launch,
+  .secondary {
+    width: 100%;
+  }
+}
+
+
+/* v66 compact toolbar button fix */
+.toolbar button,
+.control-bar button {
+  min-width:32px;
+  width:32px;
+  height:32px;
+  padding:0;
+  overflow:hidden;
+  white-space:nowrap;
+}
+
+
+/* v67 responsive secondary windows */
+.secondary-panel,
+.settings-panel,
+.review-panel,
+.modal,
+.popup-panel {
+  max-height: calc(100vh - 24px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.secondary-panel-content,
+.settings-content,
+.review-content,
+.modal-content,
+.popup-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+.modal-actions,
+.panel-actions,
+.settings-actions,
+.review-actions {
+  flex-shrink: 0;
+}
+
+textarea,
+input,
+select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+html.main-controller,
+html.main-controller body {
+  background: #090b0f;
+}
+
+html.main-controller .controller {
+  visibility: hidden;
+}

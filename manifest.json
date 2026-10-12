@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "极简番茄钟",
+  "version": "7.1.1",
+  "description": "极简番茄钟：真实时间采集、时间轴、Dashboard、Notion 同步与 LLM 日报自动化。",
+  "permissions": [
+    "alarms",
+    "declarativeNetRequest",
+    "scripting",
+    "storage",
+    "tabs",
+    "idle",
+    "notifications"
+  ],
+  "action": {
+    "default_title": "打开今日工作台",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "host_permissions": [
+    "<all_urls>",
+    "https://chatgpt.com/*"
+  ]
+}

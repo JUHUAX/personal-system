@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>极简番茄钟</title>
+  <script src="controller-bootstrap.js"></script>
+  <link rel="stylesheet" href="controller.css" />
+</head>
+<body>
+  <main class="controller">
+    <section class="panel">
+      <p class="kicker">Minimal Pomodoro</p>
+      <h1>极简番茄钟</h1>
+      <p class="desc">
+        点击按钮打开置顶视频式小窗。关闭小窗会停止当前所有计时，并闭合对应时间记录。
+      </p>
+
+      <div class="button-row">
+        <button class="launch" id="timelinePageButton">打开时间轴</button>
+        <button class="launch" id="launchButton">打开置顶小窗</button>
+        
+      </div>
+
+      <div class="status-message" id="pipStatus"></div>
+
+      <div class="fallback" id="fallback">
+        当前浏览器环境不支持 Document Picture-in-Picture，无法实现置顶小窗。
+      </div>
+
+      <div class="notes">
+        <span>空格：开始 / 暂停</span>
+        <span>← / →：调整 10 秒</span>
+        <span>Shift + ← / →：调整 60 秒</span>
+        <span>⚙：设置</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="controller.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.env
+.env.*
+automation/
+PERSONAL_SYSTEM_*
+IMPLEMENTATION_STATUS_V2.md
+LLM_PROMPTS_CODEX_V1.md
+LLM_PROMPTS_OPTIMIZATION_V1.md
+NOTION_EXISTING_DATABASE_REUSE_V1.md
+*.jpg
+test-results/
+playwright-report/
