@@ -1278,8 +1278,7 @@ pre {
 
 .flow-compact-actions button,
 .flow-secondary-action,
-.flow-primary-action,
-.flow-todo-actions button {
+.flow-primary-action {
   min-height: 30px;
   padding: 0 9px;
   border: 1px solid var(--line-strong);
@@ -1570,7 +1569,7 @@ body.inspiration-page-active #calendarProgress { display: none; }
   padding: 9px;
   border: 1px solid var(--line);
   border-left: 3px solid #83c5ff;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--panel-2);
 }
 
@@ -1583,6 +1582,32 @@ body.inspiration-page-active #calendarProgress { display: none; }
   font-size: 12px;
   line-height: 1.45;
 }
+
+.flow-todo-heading { display: flex; align-items: flex-start; gap: 9px; min-width: 0; cursor: pointer; }
+.flow-todo-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.flow-todo-check { flex: 0 0 16px; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--success); cursor: pointer; }
+.flow-todo-item > small { padding-left: 25px; }
+.flow-todo-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flow-life-section { background: rgba(232,197,127,0.035); }
+.life-view { width: min(1000px, 100%); margin: 0 auto; }
+.life-view.hidden { display: none; }
+.life-view-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.life-view-head h2 { margin: 0; font-size: 18px; }
+.life-view-head span { color: var(--muted); font-size: 12px; }
+.life-view-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.life-view-actions input { min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); color-scheme: dark; }
+.life-empty { grid-column: 1 / -1; }
+.life-day-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.life-day-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.life-day-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.life-day-card h3 { font-size: 14px; margin: 0; }
+.life-day-card header span { color: var(--muted); font-size: 12px; }
+.life-day-card textarea { width: 100%; min-height: 200px; padding: 12px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text); font-size: 14px; line-height: 1.8; }
+.life-day-card textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.life-day-card .flow-save-state { display: block; margin-top: 8px; }
+[data-life-status][data-state="error"], #lifeViewStatus[data-state="error"] { color: var(--danger-color); }
+body.life-page-active #summary, body.life-page-active #calendarProgress { display: none; }
+@media (max-width: 700px) { .life-day-list { grid-template-columns: minmax(0, 1fr); } .life-view-head { flex-wrap: wrap; } }
 
 .pending-sync-badge {
   display: inline-flex;
@@ -1602,31 +1627,6 @@ body.inspiration-page-active #calendarProgress { display: none; }
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
-}
-
-.flow-todo-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.flow-todo-actions button {
-  min-height: 28px;
-  padding: 0 7px;
-}
-
-.flow-todo-actions .flow-notion-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  margin-right: auto;
-}
-
-.flow-review-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
 }
 
 .flow-review-actions {
@@ -1679,132 +1679,7 @@ body.inspiration-page-active #calendarProgress { display: none; }
   width: 100%;
 }
 
-.phase-plan-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-}
 
-.phase-summary-card {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 15px;
-  border: 1px solid rgba(103,183,255,0.18);
-  border-radius: 13px;
-  background: rgba(103,183,255,0.045);
-}
-
-.phase-summary-card strong {
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.phase-summary-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.phase-summary-head strong {
-  min-width: 0;
-}
-
-.phase-summary-head a,
-.flow-notion-link {
-  flex: 0 0 auto;
-  color: #b9dcff;
-  font-size: 12px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.phase-summary-head a:hover,
-.flow-notion-link:hover,
-.phase-plan-card-head > a:hover {
-  color: #e2f2ff;
-  text-decoration: underline;
-}
-
-.phase-summary-card span,
-.phase-summary-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.65;
-}
-
-.phase-summary-card p {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.phase-summary-primary {
-  display: grid;
-  gap: 8px;
-  padding: 11px 12px;
-  border: 1px solid rgba(103,183,255,0.16);
-  border-radius: 10px;
-  background: rgba(103,183,255,0.055);
-}
-
-.phase-summary-primary small {
-  color: #bcebd9;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.phase-summary-primary ol {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.phase-summary-primary li {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 9px;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.phase-summary-primary time {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.phase-summary-card button {
-  justify-self: start;
-  min-height: 34px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  color: var(--text);
-  background: rgba(255,255,255,0.04);
-  cursor: pointer;
-}
-
-.phase-summary-detail {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 9px;
-  padding-top: 9px;
-  border-top: 1px solid var(--line);
-  color: rgba(232,244,255,0.86);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
 
 .todo-editor-overlay {
   position: fixed;
@@ -4434,11 +4309,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   gap: 7px;
 }
 
-.notion-todo-actions a {
-  color: var(--muted);
-  font-size: 11px;
-  text-decoration: none;
-}
 
 .notion-todo-actions button {
   min-height: 37px;
@@ -4516,13 +4386,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   gap: 5px;
 }
 
-.phase-plan-card-head > a {
-  flex: 0 0 auto;
-  color: #b9dcff;
-  font-size: 13px;
-  font-weight: 800;
-  text-decoration: none;
-}
 
 .phase-plan-source,
 .phase-plan-breakdown {
@@ -4645,7 +4508,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
 }
 .phase-database-meta, .phase-database-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .phase-database-meta span { padding: 4px 8px; border-radius: 999px; color: var(--muted); background: rgba(255,255,255,0.05); font-size: 11px; }
-.phase-database-actions .flow-notion-link { margin-left: auto; }
 .phase-database-detail {
   display: grid;
   min-width: 0;
@@ -4785,14 +4647,12 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
     flex-direction: column;
   }
 
-  .phase-plan-breakdown .notion-milestones > li,
-  .phase-summary-primary li {
+  .phase-plan-breakdown .notion-milestones > li {
     grid-template-columns: 1fr;
     gap: 5px;
   }
 }
 
-.notion-plan-item,
 .notion-empty {
   padding: 11px 12px;
   border: 1px solid var(--line);
@@ -4800,24 +4660,9 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   background: var(--panel-2);
 }
 
-.notion-plan-item {
-  display: grid;
-  gap: 5px;
-  color: var(--text);
-  text-decoration: none;
-  transition: border-color 120ms ease, background 120ms ease;
-}
 
-.notion-plan-item:hover {
-  border-color: rgba(103,183,255,0.28);
-  background: rgba(103,183,255,0.07);
-}
 
-.notion-plan-item strong {
-  font-size: 14px;
-}
 
-.notion-plan-item small,
 .notion-empty {
   color: var(--muted);
   font-size: 12px;
@@ -4831,18 +4676,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   font-size: 13px;
 }
 
-.notion-card-link {
-  flex: 0 0 auto;
-  color: #a8d8ff;
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: none;
-}
 
-.notion-card-link:hover {
-  color: #d8efff;
-  text-decoration: underline;
-}
 
 .notion-view .notion-secret-toggle {
   min-height: 44px;
@@ -5204,8 +5038,7 @@ button.is-busy::before {
 .text-view,
 .editor-card,
 .list-card,
-.notion-card,
-.phase-summary-card {
+.notion-card {
   border-color: rgba(154,199,238,0.105);
   background:
     linear-gradient(145deg, rgba(20,26,33,0.97), rgba(15,20,26,0.97));
@@ -5343,8 +5176,7 @@ button.is-busy::before {
 
 .flow-compact-actions button,
 .flow-secondary-action,
-.flow-primary-action,
-.flow-todo-actions button {
+.flow-primary-action {
   min-height: 34px;
   border-radius: 9px;
   font-size: 12px;
@@ -5357,30 +5189,9 @@ button.is-busy::before {
   background: linear-gradient(180deg, #a9ddff, #74c0f6);
 }
 
-.phase-plan-summary-grid {
-  gap: 14px;
-}
-
-.phase-summary-card {
-  gap: 10px;
-  padding: 17px;
-  border-radius: var(--radius-card);
-}
-
-.phase-summary-card strong { font-size: 16px; }
-.phase-summary-card span,
-.phase-summary-card p { font-size: 13px; }
-
-.phase-summary-primary,
 .phase-plan-source,
 .phase-plan-breakdown {
   border-radius: 12px;
-}
-
-.phase-summary-card button {
-  min-height: 36px;
-  border-radius: var(--radius-control);
-  font-size: 12px;
 }
 
 .notion-hero {
@@ -5517,7 +5328,6 @@ textarea::placeholder {
 
 .notion-todo-item,
 .notion-weekly-plan-card,
-.notion-plan-item,
 .notion-empty {
   border-radius: 12px;
 }
@@ -5530,39 +5340,8 @@ textarea::placeholder {
 .notion-todo-copy small,
 .notion-todo-copy span { font-size: 13px; }
 
-.notion-card-link,
-.phase-plan-card-head > a,
-.phase-summary-head a,
-.flow-notion-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 30px;
-  padding: 4px 8px;
-  border: 1px solid rgba(120,199,255,0.16);
-  border-radius: 9px;
-  color: #bde2ff;
-  background: rgba(120,199,255,0.045);
-  text-decoration: none;
-}
 
-.notion-card-link::after,
-.phase-plan-card-head > a::after,
-.phase-summary-head a::after,
-.flow-notion-link::after {
-  content: "↗";
-  font-size: 11px;
-}
 
-.notion-card-link:hover,
-.phase-plan-card-head > a:hover,
-.phase-summary-head a:hover,
-.flow-notion-link:hover {
-  color: #edf8ff;
-  border-color: rgba(120,199,255,0.34);
-  background: rgba(120,199,255,0.09);
-  text-decoration: none;
-}
 
 body.llm-progress-open {
   overflow: hidden;

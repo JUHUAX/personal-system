@@ -12,7 +12,7 @@ const server = http.createServer((req, res) => {
   }
   let content = fs.readFileSync(file);
   if (name === "/notion-integration.js") content = content.toString().replace("  function escapeNotionHtml(value)",
-    "  globalThis.__notionTests = { renderPhaseDatabase, renderFlowTodos, renderFlowReview, renderTodos, renderWeeklyPlan };\n  function escapeNotionHtml(value)");
+    "  globalThis.__notionTests = { renderPhaseDatabase, renderFlowTodos, renderFlowReview, renderTodos, renderWeeklyPlan, storeLocalTodos };\n  function escapeNotionHtml(value)");
   res.setHeader("Content-Type", ({ ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png" })[path.extname(file)]);
   res.end(content);
 });
@@ -32,10 +32,11 @@ const server = http.createServer((req, res) => {
       if (!host.__mockStore) {
         host.__clock = "2026-10-12T15:00:00+08:00";
         host.__opened = []; host.__writes = []; host.__listeners = [];
-        host.__mockStore = {
+        host.__mockStore = JSON.parse(sessionStorage.getItem("__persistedMockStore") || "null") || {
           "minimalPomodoroInspirations:2026-10-09": "历史灵感 A\n第二行",
           "minimalPomodoroInspirations:2026-10-10": "",
           "minimalPomodoroInspirations:2026-10-12": "今天的灵感 B",
+          "minimalPomodoroLifeRecords:2026-10-09": { schemaVersion: 1, date: "2026-10-09", text: "历史生活记录：睡眠八小时，三餐规律。", pendingSync: false },
           "minimalPomodoroTimeline:2026-10-12": [{ id: "test-record", type: "work", content: "虚构工作", start: Date.parse("2026-10-12T10:00:00+08:00"), end: Date.parse("2026-10-12T10:25:00+08:00"), round: 9, completion: "high", focus: "good", interruption: "none", reviewPending: true, reviewNote: "以前的完成情况" }],
         };
       }
@@ -53,7 +54,8 @@ const server = http.createServer((req, res) => {
               return Object.fromEntries(list.map((key) => [key, host.__mockStore[key] ?? (keys && !Array.isArray(keys) && typeof keys === "object" ? keys[key] : undefined)]));
             },
             set: async (values) => {
-              if (host.__failSave && Object.keys(values).some((key) => key.startsWith("minimalPomodoroInspirations:"))) throw new Error("虚构保存失败");
+              if (host.__failSave && Object.keys(values).some((key) => key.startsWith("minimalPomodoroInspirations:") || key.startsWith("minimalPomodoroLifeRecords:"))) throw new Error("虚构保存失败");
+              if (host.__failQueue && Object.keys(values).includes("minimalPomodoroNotionWriteQueue:v1")) throw new Error("虚构队列保存失败");
               const changes = Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { oldValue: host.__mockStore[key], newValue }]));
               Object.assign(host.__mockStore, structuredClone(values));
               host.__writes.push(structuredClone(values));
@@ -102,9 +104,11 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: 1440, height: 980 });
     await page.evaluate(() => setMode("phases"));
     await page.evaluate(() => {
-      __notionTests.renderPhaseDatabase([{ id: "test-plan", title: "虚构阶段计划", startDate: "2026-10-09", endDate: "2026-10-18", status: "active", milestones: [], url: "https://www.notion.so/test-plan" }]);
+      __notionTests.renderPhaseDatabase([{ id: "test-plan", title: "虚构阶段计划", startDate: "2026-10-09", endDate: "2026-10-18", status: "active", milestones: [{date:"2026-10-12",goal:"两项科研",planningMode:"percentage",targetProgressPercent:null,estimatedMinutes:null,taskProgress:[{taskId:"task:stateweaver",title:"stateweaver",targetProgressPercent:50},{taskId:"task:behavfuzz",title:"behavfuzz",targetProgressPercent:25}]}], url: "https://www.notion.so/test-plan" }]);
     });
     const card = page.locator(".phase-database-card");
+    assert.match(await card.textContent(),/stateweaver：累计预期 50%/);
+    assert.match(await card.textContent(),/behavfuzz：累计预期 25%/);
     assert.equal(await card.locator("a").count(), 0);
     await card.click({ button: "right" });
     await page.locator("#notionContextMenu button").click();
@@ -135,8 +139,110 @@ const server = http.createServer((req, res) => {
     });
     await page.waitForFunction(() => window.__mockStore["minimalPomodoroTimeline:2026-10-12"][0].reviewNote === "番茄结束后的完成情况");
     assert.equal(await page.evaluate(() => window.__mockStore["minimalPomodoroTimeline:2026-10-12"][0].completion), "high", "Historical fields are preserved, not replaced by defaults");
+    await page.evaluate(async () => {
+      currentWeekStart = startOfWeek(new Date());
+      await selectTodayDate(new Date());
+      setMode("today");
+    });
+    const todayLife = page.locator('#todayFlowGrid textarea[data-life-date="2026-10-12"]');
+    await todayLife.waitFor({ state: "visible" });
+    const lifeText = "  昨晚睡了七小时。\n早餐鸡蛋，午饭米饭，晚饭面条。\n心情平静，没有喝甜水。\n";
+    await todayLife.fill(lifeText);
+    await page.evaluate(() => loadRecords({ planningRemote: false }));
+    assert.equal(await todayLife.inputValue(), lifeText, "Refreshing cannot discard an unsaved life draft");
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"]?.text.includes("心情平静"));
+    assert.equal(await page.evaluate(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"].text), lifeText);
+    await page.locator("#historyLifeMode").evaluate((node) => node.click());
+    const historyLife = page.locator('#lifeDayList textarea[data-life-date="2026-10-12"]');
+    await page.locator('[data-life-card-date="2026-10-12"] [data-life-edit]').click();
+    await historyLife.waitFor({ state: "visible" });
+    assert.equal(await historyLife.inputValue(), lifeText);
+    assert.equal(await page.locator(".life-day-card").count(), 1, "Do not create empty future-day cards");
+    await historyLife.fill(lifeText + "补充：晚上散步。");
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"]?.text.endsWith("晚上散步。"));
+    await page.evaluate(() => DailyLifeRecords.acceptRemote("2026-10-12", { text: "云端旧文", url: "https://www.notion.so/test-life" }));
+    assert.match(await historyLife.inputValue(), /晚上散步/);
+    await page.evaluate(() => window.__failSave = true);
+    await historyLife.fill("保存失败时的生活草稿");
+    await page.waitForFunction(() => document.querySelector('#lifeDayList [data-life-status="2026-10-12"]').dataset.state === "error");
+    await page.evaluate(() => loadRecords({ planningRemote: false }));
+    assert.equal(await historyLife.inputValue(), "保存失败时的生活草稿");
+    await page.evaluate(() => window.__failSave = false);
+    await historyLife.fill(lifeText);
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"].text.endsWith("甜水。\n"));
+    await historyLife.fill("");
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"].text === "");
+    await historyLife.fill(lifeText);
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-12"].text === "  昨晚睡了七小时。\n早餐鸡蛋，午饭米饭，晚饭面条。\n心情平静，没有喝甜水。\n");
+    await page.evaluate(() => { window.__clock = "2026-10-13T00:01:00+08:00"; });
+    await page.locator("#lifeRecordDate").fill("2026-10-13");
+    await page.locator("#openLifeRecordDay").click();
+    const nextLife = page.locator('#lifeDayList textarea[data-life-date="2026-10-13"]');
+    await nextLife.fill("新一天的心情很好。");
+    await page.waitForFunction(() => window.__mockStore["minimalPomodoroLifeRecords:2026-10-13"]?.text === "新一天的心情很好。");
+    assert.equal(await historyLife.inputValue(), lifeText, "Midnight does not move the previous day's text");
+    await page.screenshot({ path: path.join(root, "test-results/life-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    assert.ok((await page.locator(".life-day-card").first().boundingBox()).y < 844);
+    await page.screenshot({ path: path.join(root, "test-results/life-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 980 });
+    await page.locator("#prevWeekBtn").click();
+    const oldLife = page.locator('#lifeDayList textarea[data-life-date="2026-10-09"]');
+    await page.locator('[data-life-card-date="2026-10-09"] [data-life-edit]').click();
+    await oldLife.waitFor({ state: "visible" });
+    assert.match(await oldLife.inputValue(), /历史生活记录/);
+    await page.evaluate(async () => {
+      window.__clock = "2026-10-12T15:00:00+08:00";
+      currentWeekStart = startOfWeek(new Date());
+      await selectTodayDate(new Date());
+      setMode("today");
+      await __notionTests.storeLocalTodos("2026-10-12", [{ id: "test-todo", title: "虚构待办", status: "pending", priority: "high", url: "https://www.notion.so/test-todo", estimatedPomodoros: 2, planningMode:"explicit", targetProgressPercent:50, phaseTaskId:"task:stateweaver" }], await MinimalPomodoroNotion.getConfig());
+    });
+    const todo = page.locator('#todayFlowGrid .flow-todo-item[data-todo-id="test-todo"]');
+    assert.match(await todo.textContent(),/累计预期目标 50%/);
+    assert.equal(await todo.locator("button").count(), 0, "Todo operations are in the context menu, not on the card");
+    const check = todo.locator('input[type="checkbox"]');
+    await check.check();
+    await page.waitForFunction(() => document.querySelector('#todayFlowGrid .flow-todo-item').dataset.status === "done");
+    assert.equal(await check.isChecked(), true);
+    await check.uncheck();
+    await page.waitForFunction(() => document.querySelector('#todayFlowGrid .flow-todo-item').dataset.status === "pending");
+    await page.evaluate(() => window.__failQueue = true);
+    await check.check();
+    await page.waitForFunction(() => !document.querySelector('#todayFlowGrid .flow-todo-check').disabled);
+    assert.equal(await check.isChecked(), false, "A failed status save restores the original checkmark");
+    await page.evaluate(() => window.__failQueue = false);
+    await todo.click({ button: "right" });
+    assert.deepEqual(await page.locator("#notionContextMenu button").allTextContents(), ["开始", "编辑", "删除", "在 Notion 中查看"]);
+    await page.locator("#notionContextMenu button").filter({ hasText: /^编辑$/ }).click();
+    await page.locator("#notionTodoEditor").waitFor({ state: "visible" });
+    assert.equal(await page.locator("#notionTodoTitle").inputValue(), "虚构待办");
+    await page.keyboard.press("Escape");
+    await todo.focus(); await page.keyboard.press("Shift+F10");
+    await page.locator("#notionContextMenu").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.screenshot({ path: path.join(root, "test-results/todo-desktop.png"), fullPage: true });
+    await frame.evaluate(() => {
+      window.MinimalPomodoroController = { ...window.MinimalPomodoroController, startTodoInPip: async (item) => { window.top.__startedTodo = item; return true; } };
+    });
+    await todo.click({ button: "right" });
+    await page.locator("#notionContextMenu button").filter({ hasText: /^开始$/ }).click();
+    await page.waitForFunction(() => window.__startedTodo?.title === "虚构待办");
+    assert.equal(await page.evaluate(() => window.__startedTodo.date), "2026-10-12");
+    page.once("dialog", (dialog) => dialog.accept());
+    await todo.click({ button: "right" });
+    await page.locator("#notionContextMenu button").filter({ hasText: /^删除$/ }).click();
+    await page.waitForFunction(() => !document.querySelector('#todayFlowGrid .flow-todo-item[data-todo-id="test-todo"]'));
+    await page.evaluate(() => sessionStorage.setItem("__persistedMockStore", JSON.stringify(window.__mockStore)));
+    await page.reload();
+    await page.evaluate(() => setMode("life"));
+    await page.locator('[data-life-card-date="2026-10-12"] [data-life-edit]').click();
+    await historyLife.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.querySelector('#lifeDayList textarea[data-life-date="2026-10-12"]')?.value.includes("心情平静"));
+    assert.equal(await historyLife.inputValue(), lifeText, "Life records survive reopening");
     assert.deepEqual(errors, []);
-    console.log("Browser UI: desktop/mobile, notebook save/refresh/failure/midnight, Notion menu/keyboard/URL safety, record and Pomodoro completion passed (synthetic local data only)");
+    console.log("Browser UI: desktop/mobile, notebooks, daily life drafts/save/failure/midnight/history/reopen, todo checkbox/undo/failure/menu/keyboard, Notion URL safety and record reviews passed (synthetic local data only)");
     await context.close();
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => server.close());

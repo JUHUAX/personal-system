@@ -10,7 +10,7 @@
   const WRITE_QUEUE_KEY = "minimalPomodoroNotionWriteQueue:v1";
   const WRITE_QUEUE_STATE_KEY = "minimalPomodoroNotionWriteQueueState";
   const TIMELINE_PREFIX = "minimalPomodoroTimeline:";
-  const workPolicy = global.WorkPromptPolicy;
+  const prompts = global.LlmPrompts;
   let localWriteQueueLock = Promise.resolve();
 
   async function withWriteQueueLock(operation) {
@@ -41,124 +41,6 @@
     llmApiKey: "",
   });
 
-  const LLM_COMMON_RULES = [
-    "你是 Minimal Pomodoro 的个人规划助手。只使用输入事实，不虚构进度、偏好或承诺。",
-    "计划日期和时间必须符合 planningProfile 的工作窗口，并避开 routineBlocks 与 dateOverrides。",
-    "若时间不足，减少任务或放入 deferredTodos，绝不把冲突任务硬塞进日程。",
-    "待办只能由用户标记 done；不得把 pending 或 in_progress 自动改成 done。",
-    "输出必须是严格 JSON，不要 Markdown，不要额外解释。",
-  ].join("\n");
-
-  const LLM_RECORD_RULES = [
-    "你是 Minimal Pomodoro 的时间记录整理助手。只使用输入事实，不虚构活动、时间或持续时长。",
-    "输出必须是严格 JSON，不要 Markdown，不要额外解释。",
-  ].join("\n");
-
-  const LLM_ACTION_PROMPTS = Object.freeze({
-    "time_record.parse": [
-      "把用户对指定日期的自然语言描述整理为可写入时间流的记录。selectedDate 是唯一有效日期，即使描述中出现‘昨天’‘今天’也以 selectedDate 为准。",
-      "只提取用户明确说出的活动，不补造未提及的活动、时间或持续时长。用户没有提供可确定的起止时间时返回 status=blocked，并在 blockedReason 说明还缺什么。",
-      "可以根据明确的开始时间和持续时长计算结束时间，也可以把连续描述拆成多条记录；不得让记录互相重叠。",
-      "type 只能是 work、break、life、entertainment。content 使用简短具体的原始活动名称，不添加评价或总结，最多 40 个汉字；补充说明放入 note。",
-      "start 和 end 必须是带时区的 ISO 8601，必须落在 selectedDate，且 end 严格晚于 start。",
-      "输出严格 JSON：status（ok|blocked）、blockedReason、records。records 每项只包含 type、content、start、end、note，最多 24 条。",
-    ].join("\n"),
-    "phase_plan.decompose": [
-      "把用户的自然语言阶段计划拆成覆盖 startDate 到 endDate（含）的每日里程碑。",
-      "同时生成一个简短明确的 planTitle（建议 6–20 个汉字），作为整个阶段稳定名称。",
-      "日期范围内每个自然日都必须有一条 milestone；休息或缓冲日也明确写出。",
-      "每个工作日 milestone 必须把当日任务列入 taskEstimates；每项严格包含 title、estimatedMinutes（正整数分钟）和 deliverable。estimatedMinutes 是完成该任务所需的专注工作时间估计，不含休息。",
-      "milestone.estimatedMinutes 必须等于该日 taskEstimates 的 estimatedMinutes 之和；休息或纯缓冲日允许 taskEstimates=[] 且 estimatedMinutes=0。估算必须结合任务复杂度、依赖和 planningProfile 的实际容量，不得为了塞入日期范围而故意低估。",
-      "输出：status、blockedReason、planTitle、summary、assumptions（数组）、questions（数组）、milestones（数组）。",
-      "每个 milestone 包含 date、goal、deliverables（字符串数组）、taskEstimates（对象数组）、estimatedMinutes、notes；日期不得超出阶段范围。",
-    ].join("\n"),
-    "daily_review.generate": [
-      "同时生成当天复盘和下一日待办。这是当天常规流程中唯一一次 LLM 调用。",
-      "必须把 userCompletion 当作核心事实；为空时返回 status=blocked 且不生成内容。",
-      "generateNextTodos=false 表示次日没有可用阶段计划、里程碑或工作窗口；此时仍必须正常生成 review，但 nextDayTodos=[]，并在 warnings 说明未生成次日待办的原因。",
-      "existingNextTodos 是用户已经为次日保存的待办，必须保留且不得重复生成同名任务；新待办不得与其计划时间重叠。",
-      "生成次日待办时，nextDayMilestone 只是阶段方向与工作量估计的参考，不是必须逐项照搬的清单。应优先结合当天 todos 的真实状态、userCompletion、records 中的实际时间花费和 review 反映的偏差，再从整个 phasePlan 选择次日最合理的任务、粒度和顺序。",
-      "如果前一日实际耗时与阶段估计不同，应据此修正次日任务数量和 estimatedPomodoros；容量不足时允许拆分、延后或舍弃里程碑中的部分任务，并在 deferredTodos 或 warnings 中说明。不得为了贴合原估计制造不现实日程。",
-      "输出 status、blockedReason、review（dailySummary、timeAnalysis、problemAnalysis、nextFocus）、nextDayTodos、fixedSchedule、deferredTodos、warnings。",
-      "nextDayTodos 默认 3–6 项且最多 8 项；每项包含 title、details、priority、estimatedPomodoros、source、plannedStart、plannedEnd、origin=llm。",
-      "plannedStart/plannedEnd 使用带日期的 ISO 8601；同一天任务不得互相重叠。",
-    ].join("\n"),
-    "daily_todo.initial": [
-      "为阶段计划第一天生成当天待办。这不是日报，不需要前一天的完成情况或总结。",
-      "只依据 phasePlan、dayMilestone 和 planningProfile 安排 date 当天任务，不得虚构已经完成的工作。",
-      "dayMilestone 是阶段方向和时间估计的参考，不是必须逐项照搬的待办清单；应按当天可用容量把任务拆成可执行待办，并允许将超出容量的部分放入 deferredTodos。",
-      "如果 earliestStart 非空，所有待办的 plannedStart 都不得早于 earliestStart，并且只能使用 availableWindows。",
-      "输出 status、blockedReason、todos、fixedSchedule、deferredTodos、warnings。",
-      "todos 默认 3–6 项且最多 8 项；每项包含 title、details、priority、estimatedPomodoros、source、plannedStart、plannedEnd、origin=llm。",
-      "plannedStart/plannedEnd 使用带日期的 ISO 8601，必须位于工作窗口且避开固定安排，任务不得重叠。",
-    ].join("\n"),
-    "daily_todo.generate": [
-      "为 date 生成当天待办，不生成日报或总结。",
-      "phasePlan 和 dayMilestone 提供阶段方向与原始时间估计，但不是必须逐项、按原顺序或按原估计照搬的待办清单。必须同时参考 previousDayContext 中前一天待办状态、用户完成情况、真实时间记录与总结偏差，重新判断当天任务的内容、粒度、顺序和预计用时。",
-      "当前一天的实际耗时与阶段估计不同，应使用真实耗时校正 estimatedPomodoros 和当天任务数量；允许拆分、合并、延后或舍弃里程碑中的部分任务，并在 deferredTodos 或 warnings 中说明。不得为了追赶阶段计划压缩成不现实的日程。",
-      "严格遵守 planningProfile 中的工作窗口、固定安排与例外。",
-      "如果 earliestStart 非空，这是用户手动触发生成的最早排程边界；所有待办的 plannedStart 都不得早于 earliestStart，并且只能使用 availableWindows。",
-      "previousDayContext 可能为 null。存在时参考其 userCompletion、review 和 todos；不存在时不得阻塞，只根据阶段计划生成。",
-      "不得虚构前一天的进度，不得自动把任何待办标记为 done。",
-      "输出 status、blockedReason、todos、fixedSchedule、deferredTodos、warnings。",
-      "todos 默认 3–6 项且最多 8 项；每项包含 title、details、priority、estimatedPomodoros、source、plannedStart、plannedEnd、origin=llm。",
-      "plannedStart/plannedEnd 使用带日期的 ISO 8601，任务不得重叠。",
-    ].join("\n"),
-    "daily_todo.adjust": [
-      "按 instruction 调整指定日期待办，像聊天式重排，但不重新生成日报。",
-      "protectedTodos 只包含用户已标记为 done 的待办，必须原样保留。其他待办无论是用户创建、in_progress、已经开始或计划时间已过，都属于 adjustableTodos，可按指令重排。",
-      "如果 earliestStart 非空，所有重新安排的待办 plannedStart 都不得早于 earliestStart，并且只能使用 availableWindows。任何未完成且原计划开始时间早于 earliestStart 的待办，必须在 todos 中重新安排到 earliestStart 之后，或在确实需要取消时放入 deletedTodoIds，不得留在过去的时间。",
-      "只有确实需要删除的可调整待办才放入 deletedTodoIds；不得用省略待办来暗示删除。protectedTodos 的 ID 永远不得出现在 deletedTodoIds。",
-      "输出 status、blockedReason、changeSummary、todos、deletedTodoIds、warnings。todos 只包含新增或修改后的可调整待办，最多 8 项。",
-    ].join("\n"),
-    "daily_todo.intraday_adjust": [
-      "根据 currentTime 前已发生的真实时间记录、待办状态、userCompletion、当天阶段里程碑和个人节奏，重排 date 剩余时间的待办。",
-      "这是日内自动调整，不生成日报、不修改阶段计划、不安排到其他日期。",
-      "protectedTodos 只包含 done，必须原样保留。用户手工创建、in_progress、已经开始或原计划时间已过但未 done 的待办都可调整。",
-      "未完成且原计划开始时间早于 currentTime 的待办，必须重排到 currentTime 之后或显式删除，不得留在过去的时间。",
-      "adjustableTodos 可以重排、拆分、合并、降级或删除，但新的 plannedStart 必须晚于 currentTime，并严格避开固定安排和已占用时间。",
-      "records 只代表已投入的时间，不能单独证明任务完成；只有 todo.status=done 才能视为完成。",
-      "剩余容量不足时必须减少任务，并在 warnings 中说明推迟或删减内容，不得制造时间冲突。",
-      "只有确实需要删除的可调整待办才放入 deletedTodoIds；不得用省略待办来暗示删除。protectedTodos 的 ID 永远不得出现在 deletedTodoIds。",
-      "输出 status、blockedReason、changeSummary、todos、deletedTodoIds、warnings。todos 只包含新增或修改后的可调整待办，最多 8 项。",
-    ].join("\n"),
-    "daily_todo.intraday_repair": [
-      "上一次日内调整结果未通过时间校验。根据 validationError 只修正 candidateTodos 的时间与必要的任务取舍，不得修改 protectedTodos。",
-      "所有可调整待办的开始时间不得早于 currentTime，并且位于 availableWindows 中；不得与 protectedTodos、routineBlocks、dateOverrides 或其他待办重叠。requiredRescheduleTodos 中的每条未完成过时待办都必须重排到 currentTime 之后。",
-      "时间不足时删减低优先级项并写入 warnings，不得再输出非法时间。",
-      "输出 status、blockedReason、changeSummary、todos、warnings。todos 仅包含修正后的可调整待办，最多 8 项。",
-    ].join("\n"),
-    "phase_plan.adjust": [
-      "任务：根据用户 instruction 和实际执行证据，重新规划阶段计划从 today 到 plan.endDate（含）的剩余里程碑。不要重新生成日报或每日待办。",
-      "输入字段：today；instruction；plan（含 title、planId、startDate、endDate、description、constraints、milestones、adjustments）；records（真实时间记录）；dailyContext（逐日 todos 与 review）。",
-      "事实优先级：用户 instruction > 用户填写的 review.userCompletion > todo.status > 真实 records > 原 milestones。不同来源冲突时不得猜测，应在 warnings 中说明。",
-      "只把 status=done 视为待办完成；pending/in_progress、存在时间投入或用户提及均不能自动视为完成。",
-      "date < today 的历史里程碑不可输出、不可重写；插件会原样保留。输出必须完整覆盖 today 到 plan.endDate 的每个自然日，每日恰好一个 milestone。",
-      "不得修改 plan.title、plan.planId 和 startDate。plan.endDate 是用户在前端确认的新期限，必须以它为边界重排；previousEndDate 仅用于理解本次缩短或延长。",
-      "调整应继承仍然有效的目标和约束，优先保留已投入但未完成的事项；允许拆小、降级、延后到范围内日期或明确放弃不再合理的事项。",
-      "不得为了看似完成而压缩出不现实的工作量。容量不足时降低范围，并在 warnings 中列出被取消、降级或无法安排的内容。",
-      "休息日、缓冲日也必须输出 milestone，并以 goal 明确标记。deliverables 必须是可验证结果；notes 解释承接关系、风险或调整理由，不得写虚假进度。",
-      "每个工作日 milestone 必须包含 taskEstimates；每项严格包含 title、estimatedMinutes（正整数分钟）和 deliverable。estimatedMinutes 是预计专注工作分钟数，不含休息，并应结合 records 中的真实耗时校正，不得沿用已经被事实证明不合理的旧估计。",
-      "milestone.estimatedMinutes 必须等于该日 taskEstimates 的 estimatedMinutes 之和；休息或纯缓冲日允许 taskEstimates=[] 且 estimatedMinutes=0。总工作量必须能放入剩余日期的实际容量，放不下时缩小范围并写入 warnings。",
-      "输出严格 JSON：status（ok|blocked）、blockedReason、changeSummary、milestones、warnings。不得输出其他顶层字段。",
-      "milestones 中每项严格包含 date（YYYY-MM-DD）、goal（非空字符串）、deliverables（字符串数组）、taskEstimates（对象数组）、estimatedMinutes（非负整数）、notes（字符串）。按日期升序且日期不得重复或越界。",
-      "只有缺少计划日期、原计划主体或 instruction 无法理解等导致无法安全调整时返回 status=blocked；blocked 时 milestones=[]，blockedReason 必须具体。",
-    ].join("\n"),
-    "phase_plan.summarize": [
-      "任务：阶段计划到达最后一天或被用户提前结束后，基于输入证据生成一次可存档的阶段总结。不得生成新待办、不得调整计划、不得修改任何完成状态。",
-      "输入字段：plan（含标题、日期范围、描述、约束、里程碑和调整记录）；records（阶段日期范围内真实时间记录）；dailyContext（每天的 todos 与 review）；statistics（插件按日计算的投入分钟、工作分钟、待办状态数量及完成率）。",
-      "证据优先级：用户填写的 review.userCompletion 和 todo.status 是完成判断的主要证据；records 只能证明投入时间，不能单独证明任务完成；LLM dailySummary 是辅助材料而非独立事实来源。",
-      "只有 todo.status=done 可直接认定该待办完成。pending/in_progress 必须归入未完成或进展中；不得因投入时间、标题相似或日报语气乐观而擅自判定完成。",
-      "需要覆盖整个 plan.startDate 到 plan.endDate。缺少某日记录或复盘时明确说明数据缺口，不得补造活动。没有时间记录时写明无可用记录，不得估算不存在的分钟数。",
-      "timeAnalysis 应以 records 中真实起止时间计算并解释总投入、按日趋势、主要任务/类型和明显偏差；避免伪精确，不得把休息、生活、娱乐计入工作投入。",
-      "statistics 是插件从原始记录确定性计算的辅助统计，应用于核对按日时间花费和待办完成情况；如与原始证据冲突，以 records、todo.status 和 review.userCompletion 为准并说明差异。",
-      "achievementSummary 对照原 description、constraints 和每个 milestone，总结已完成、部分完成、未完成及范围变化；需要区分原计划与调整后的目标。",
-      "unfinishedItems 每项是可继续处理的具体事项，保留原因或当前状态；不要自动搬入下一阶段。lessons 必须从证据归纳，nextSuggestions 是建议而不是已决定事项。",
-      "输出严格 JSON：status（ok|blocked）、blockedReason、phaseSummary、achievementSummary、timeAnalysis、unfinishedItems、lessons、nextSuggestions。不得输出其他顶层字段。",
-      "phaseSummary、achievementSummary、timeAnalysis 为字符串；unfinishedItems、lessons、nextSuggestions 为字符串数组。文本使用简体中文，内容紧凑但包含关键证据和限制。",
-      "只有计划本身缺少有效日期范围或缺少目标描述而无法识别总结对象时返回 status=blocked；普通的数据缺失不应 blocked，应在总结中披露限制。",
-    ].join("\n"),
-  });
 
   const WORKSPACE_DATABASES = Object.freeze({
     timeRecord: {
@@ -247,6 +129,10 @@
         "说明": { rich_text: {} },
         "来源": { rich_text: {} },
         "预计番茄数": { number: { format: "number" } },
+        "规划方式": { select: { options: [{ name: "explicit" }, { name: "percentage" }] } },
+        "累计计划百分比": { number: { format: "number" } },
+        "阶段任务 ID": { rich_text: {} },
+        "投入依据": { select: { options: [{ name: "task_estimate" }, { name: "time_budget" }, { name: "unknown" }] } },
         "实际投入分钟": { number: { format: "number" } },
         "实际番茄数": { number: { format: "number" } },
         "计划时间": { date: {} },
@@ -279,6 +165,7 @@
         "标题": { title: {} },
         "日期": { date: {} },
         "用户完成情况": { rich_text: {} },
+        "生活记录": { rich_text: {} },
         "今日总结": { rich_text: {} },
         "时间分析": { rich_text: {} },
         "问题分析": { rich_text: {} },
@@ -326,6 +213,10 @@
     todoId: ["待办 ID", "待办ID", "Todo ID", "TodoId", "Task ID"],
     todoUrl: ["待办链接", "Todo URL", "Task URL"],
     estimatedPomodoros: ["预计番茄数", "Estimated Pomodoros"],
+    planningMode: ["规划方式", "Planning Mode"],
+    targetProgressPercent: ["累计计划百分比", "Target Progress Percent"],
+    phaseTaskId: ["阶段任务 ID", "Phase Task ID"],
+    effortBasis: ["投入依据", "Effort Basis"],
     actualMinutes: ["实际投入分钟", "Actual Minutes"],
     actualPomodoros: ["实际番茄数", "Actual Pomodoros", "Pomodoro Count"],
     plannedTime: ["计划时间", "Planned Time", "Schedule"],
@@ -348,6 +239,7 @@
     configJson: ["配置 JSON", "Config JSON"],
     updatedAt: ["更新时间", "Updated At"],
     userCompletion: ["用户完成情况", "当天完成情况", "User Completion", "Completion Log"],
+    lifeRecord: ["生活记录", "Life Record", "Life Journal"],
     dailySummary: ["今日总结", "Daily Summary", "Summary"],
     timeAnalysis: ["时间分析", "Time Analysis"],
     problemAnalysis: ["问题分析", "Problem Analysis", "Problems"],
@@ -403,7 +295,7 @@
     });
   }
 
-  async function enqueueWrite(operation) {
+  async function enqueueWrite(operation, localPayload = {}) {
     return withWriteQueueLock(async () => {
       const queue = await getQueuedWrites();
       const now = new Date().toISOString();
@@ -418,7 +310,7 @@
       const index = queue.findIndex((item) => item.id === next.id);
       if (index >= 0) queue[index] = { ...queue[index], ...next, queuedAt: queue[index].queuedAt || now };
       else queue.push(next);
-      await storageSet({ [WRITE_QUEUE_KEY]: queue });
+      await storageSet({ ...localPayload, [WRITE_QUEUE_KEY]: queue });
       const state = await getWriteQueueState();
       await setWriteQueueState({
         ...state,
@@ -492,6 +384,35 @@
     return true;
   }
 
+  async function queueLifeRecord(dateKey, text) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error("生活记录日期无效。");
+    const value = String(text || "");
+    if (value.length > 18000) throw new Error("单日生活记录最多 18000 字，请缩短后重试。");
+    const key = `minimalPomodoroLifeRecords:${dateKey}`;
+    const previous = (await storageGet(key))[key] || {};
+    const record = {
+      schemaVersion: 1, date: dateKey, text: value, url: previous.url || "",
+      updatedAt: new Date().toISOString(), revision: `${Date.now()}:${Math.random().toString(36).slice(2)}`, pendingSync: true,
+    };
+    await enqueueWrite({
+      id: queuedWriteId("life", dateKey), kind: "life_record", entityKey: dateKey,
+      payload: { dateKey, text: value, revision: record.revision },
+    }, { [key]: record });
+    return record;
+  }
+
+  async function cacheLifeRecord(dateKey, remote) {
+    return withWriteQueueLock(async () => {
+      const key = `minimalPomodoroLifeRecords:${dateKey}`;
+      const current = (await storageGet(key))[key];
+      if (current?.pendingSync) return null;
+      if (current?.updatedAt && remote.updatedAt && current.updatedAt > remote.updatedAt) return null;
+      const record = { schemaVersion: 1, date: dateKey, text: String(remote.text || ""), url: remote.url || "", updatedAt: remote.updatedAt || "", pendingSync: false };
+      await storageSet({ [key]: record });
+      return record;
+    });
+  }
+
   async function queuePlanningProfile(profile) {
     const normalized = normalizePlanningProfile(profile);
     if (!normalized.workWindows.length) throw new Error("请至少设置一个工作/学习时间窗口。");
@@ -532,6 +453,9 @@
     if (operation.kind === "daily_completion") {
       return saveDailyCompletion(operation.payload.dateKey, operation.payload.completion, config);
     }
+    if (operation.kind === "life_record") {
+      return saveLifeRecord(operation.payload.dateKey, operation.payload.text, config);
+    }
     if (operation.kind === "planning_profile") {
       return savePlanningProfile(operation.payload.profile, config, { allowEmpty: true });
     }
@@ -563,12 +487,19 @@
     const summary = { total: snapshot.length, succeeded: 0, failed: 0, errors: [] };
     for (const operation of snapshot) {
       try {
-        await executeQueuedWrite(operation, config);
+        const saved = await executeQueuedWrite(operation, config);
         await withWriteQueueLock(async () => {
           const latest = await getQueuedWrites();
           const current = latest.find((item) => item.id === operation.id);
-          if (current?.updatedAt === operation.updatedAt) {
-            await storageSet({ [WRITE_QUEUE_KEY]: latest.filter((item) => item.id !== operation.id) });
+          if (current?.updatedAt === operation.updatedAt &&
+              (operation.kind !== "life_record" || current.payload?.revision === operation.payload.revision)) {
+            const payload = { [WRITE_QUEUE_KEY]: latest.filter((item) => item.id !== operation.id) };
+            if (operation.kind === "life_record") {
+              const key = `minimalPomodoroLifeRecords:${operation.payload.dateKey}`;
+              const local = (await storageGet(key))[key];
+              if (local?.revision === operation.payload.revision) payload[key] = { ...local, pendingSync: false, url: saved?.url || local.url || "", updatedAt: saved?.last_edited_time || local.updatedAt };
+            }
+            await storageSet(payload);
           }
         });
         summary.succeeded += 1;
@@ -840,6 +771,10 @@
         entry("说明", PROPERTY_ALIASES.details, ["rich_text"]),
         entry("来源", PROPERTY_ALIASES.source, ["rich_text"]),
         entry("预计番茄数", PROPERTY_ALIASES.estimatedPomodoros, ["number"]),
+        entry("规划方式", PROPERTY_ALIASES.planningMode, ["select"]),
+        entry("累计计划百分比", PROPERTY_ALIASES.targetProgressPercent, ["number"]),
+        entry("阶段任务 ID", PROPERTY_ALIASES.phaseTaskId, ["rich_text"]),
+        entry("投入依据", PROPERTY_ALIASES.effortBasis, ["select"]),
         entry("实际投入分钟", PROPERTY_ALIASES.actualMinutes, ["number"]),
         entry("实际番茄数", PROPERTY_ALIASES.actualPomodoros, ["number"]),
         entry("计划时间", PROPERTY_ALIASES.plannedTime, ["date"]),
@@ -859,6 +794,7 @@
       ],
       dailyReview: [
         entry("用户完成情况", PROPERTY_ALIASES.userCompletion, ["rich_text"]),
+        entry("生活记录", PROPERTY_ALIASES.lifeRecord, ["rich_text"]),
         entry("阶段计划 ID", PROPERTY_ALIASES.phasePlanLinkId, ["rich_text"]),
         entry("阶段计划名称", PROPERTY_ALIASES.phasePlanName, ["rich_text"]),
       ],
@@ -883,6 +819,12 @@
     const additions = {};
     for (const requirement of workspacePropertyRequirements(kind)) {
       if (!findProperty(source.properties, requirement.aliases, requirement.types)) {
+        if (kind === "dailyPlan" && ["规划方式", "累计计划百分比", "投入依据", "阶段任务 ID"].includes(requirement.name) && findProperty(source.properties, requirement.aliases)) {
+          throw new Error(`已有 ${requirement.name} 字段类型不兼容，插件不会覆盖该字段。`);
+        }
+        if (kind === "dailyReview" && requirement.name === "生活记录" && findProperty(source.properties, requirement.aliases)) {
+          throw new Error("已有生活记录字段不是 Rich text，请检查字段类型；插件不会覆盖该字段。");
+        }
         additions[requirement.name] = requirement.definition;
       }
     }
@@ -1589,11 +1531,15 @@
         priority: String(valueByAliases(PROPERTY_ALIASES.priority) || "medium"),
         details: String(valueByAliases(PROPERTY_ALIASES.details) || ""),
         source: String(valueByAliases(PROPERTY_ALIASES.source) || ""),
-        estimatedPomodoros: Number(valueByAliases(PROPERTY_ALIASES.estimatedPomodoros) || 0),
+        planningMode: String(valueByAliases(PROPERTY_ALIASES.planningMode) || "explicit"),
+        phaseTaskId: String(valueByAliases(PROPERTY_ALIASES.phaseTaskId) || "") || null,
+        targetProgressPercent: valueByAliases(PROPERTY_ALIASES.targetProgressPercent) === "" || valueByAliases(PROPERTY_ALIASES.targetProgressPercent) == null ? null : Number(valueByAliases(PROPERTY_ALIASES.targetProgressPercent)),
+        effortBasis: String(valueByAliases(PROPERTY_ALIASES.effortBasis) || "task_estimate"),
+        estimatedPomodoros: valueByAliases(PROPERTY_ALIASES.effortBasis) === "unknown" ? null : Number(valueByAliases(PROPERTY_ALIASES.estimatedPomodoros) || 0),
         actualMinutes: Number(valueByAliases(PROPERTY_ALIASES.actualMinutes) || 0),
         actualPomodoros: Number(valueByAliases(PROPERTY_ALIASES.actualPomodoros) || 0),
-        plannedStart: plannedTime?.start || "",
-        plannedEnd: plannedTime?.end || "",
+        plannedStart: plannedTime?.start || (valueByAliases(PROPERTY_ALIASES.effortBasis) === "unknown" ? null : ""),
+        plannedEnd: plannedTime?.end || (valueByAliases(PROPERTY_ALIASES.effortBasis) === "unknown" ? null : ""),
         // Legacy rows have no Origin. Treat them as user-owned so an LLM
         // adjustment can never archive historical tasks by accident.
         origin: String(valueByAliases(PROPERTY_ALIASES.origin) || "user"),
@@ -1729,6 +1675,11 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < startDate) {
       throw new Error("阶段计划的开始和结束日期无效。");
     }
+    const milestoneJson = JSON.stringify(Array.isArray(plan.milestones) ? plan.milestones : []);
+    const adjustmentJson = JSON.stringify(Array.isArray(plan.adjustments) ? plan.adjustments : []);
+    if (milestoneJson.length > 18000 || adjustmentJson.length > 18000) {
+      throw new Error("阶段计划结构数据超过当前保存上限，请缩短阶段范围或减少单日事项；本次未截断JSON、未写入Notion。");
+    }
     const properties = {};
     const stablePlanId = phasePlanId(plan);
     setProperty(properties, findTitleProperty(schema), { title: richText(plan.title || `${startDate} 阶段计划`) });
@@ -1738,10 +1689,10 @@
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.weeklyGoals, ["rich_text"]), { rich_text: richTextLong(plan.description || plan.goals) });
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.constraints, ["rich_text"]), { rich_text: richTextLong(plan.constraints) });
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.milestonesJson, ["rich_text"]), {
-      rich_text: richTextLong(JSON.stringify(Array.isArray(plan.milestones) ? plan.milestones : [])),
+      rich_text: richTextLong(milestoneJson),
     });
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.phaseAdjustments, ["rich_text"]), {
-      rich_text: richTextLong(JSON.stringify(Array.isArray(plan.adjustments) ? plan.adjustments : [])),
+      rich_text: richTextLong(adjustmentJson),
     });
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.phaseSummary, ["rich_text"]), { rich_text: richTextLong(plan.finalSummary) });
     setProperty(properties, findProperty(schema, PROPERTY_ALIASES.phaseSummaryAt, ["date"]), {
@@ -1942,6 +1893,11 @@
       const end = scheduleParts(todo.plannedEnd);
       if (!start || !end || start.date !== dateKey || end.date !== dateKey || start.minutes >= end.minutes) {
         throw new Error(`待办“${todo.title || "未命名"}”的计划时间无效。`);
+      }
+      const units = Number(todo.estimatedPomodoros);
+      const requiredMinutes = units * profile.pomodoroSettings.workMinutes + Math.max(0, units - 1) * profile.pomodoroSettings.breakMinutes;
+      if (units > 0 && end.minutes - start.minutes < requiredMinutes) {
+        throw new Error(`待办“${todo.title}”的时段不足以容纳 ${units} 个专注番茄及内部休息。`);
       }
       if (!(options.allowWorkWindowOverrides && todo.workWindowOverride === true) && !windows.some((window) => {
         const range = blockMinutes(window);
@@ -2172,6 +2128,8 @@
       phasePlanId: mergedValue(PROPERTY_ALIASES.phasePlanLinkId),
       phasePlanName: mergedValue(PROPERTY_ALIASES.phasePlanName),
       duplicateCount: Math.max(0, pages.length - 1),
+      lifeRecord: findProperty(source.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"])
+        ? lifeRecordFromPages(dateKey, pages) : null,
     };
     const queued = [...await getQueuedWrites()].reverse().find((item) => item.kind === "daily_completion" && item.payload?.dateKey === dateKey);
     if (queued) {
@@ -2179,6 +2137,68 @@
       review.pendingSync = true;
     }
     return review;
+  }
+
+  function lifeRecordFromPages(dateKey, pages) {
+    const page = [...pages].sort((a, b) => String(b.last_edited_time || "").localeCompare(String(a.last_edited_time || "")))
+      .find((item) => findProperty(item.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"]));
+    return page ? {
+      date: dateKey, text: (findProperty(page.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"])[1].rich_text || [])
+        .map((item) => item.plain_text ?? item.text?.content ?? "").join(""),
+      url: page.url || "", updatedAt: page.last_edited_time || "",
+    } : null;
+  }
+
+  async function loadLifeRecordsInRange(startKey, endKey, configInput) {
+    const config = configInput || await getConfig();
+    if (!config.dailyReviewSourceId) return [];
+    const source = await resolveDataSource(config.dailyReviewSourceId, config);
+    if (!findProperty(source.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"])) return [];
+    const date = findProperty(source.properties, PROPERTY_ALIASES.date, ["date"]);
+    if (!date) throw new Error("Daily Review 缺少日期字段。");
+    const pages = await queryDataSource(source.id, {
+      page_size: 100, filter: { and: [
+        { property: date[0], date: { on_or_after: startKey } },
+        { property: date[0], date: { on_or_before: endKey } },
+      ] },
+    }, config);
+    const groups = new Map();
+    for (const page of pages) {
+      const key = String(pagePropertyValue(page, PROPERTY_ALIASES.date, ["date"]) || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(page);
+    }
+    return [...groups].map(([key, group]) => lifeRecordFromPages(key, group)).filter(Boolean);
+  }
+
+  async function saveLifeRecord(dateKey, text, configInput) {
+    const config = configInput || await getConfig();
+    if (!config.dailyReviewSourceId) throw new Error("请先绑定 Daily Review 数据源，生活记录已保存在本地。");
+    let source = await resolveDataSource(config.dailyReviewSourceId, config);
+    if (!findProperty(source.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"])) {
+      source = (await ensureWorkspaceSchema("dailyReview", source, config)).source;
+    }
+    const field = findProperty(source.properties, PROPERTY_ALIASES.lifeRecord, ["rich_text"]);
+    if (!field) throw new Error("Daily Review 的生活记录字段必须是 Rich text。");
+    const value = String(text || "");
+    if (value.length > 18000) throw new Error("单日生活记录最多 18000 字。");
+    const chunks = [];
+    for (let index = 0; index < value.length; index += 1800) chunks.push({ type: "text", text: { content: value.slice(index, index + 1800) } });
+    const properties = { [field[0]]: { rich_text: chunks } };
+    const pages = await findDailyReviewPages(dateKey, source, config);
+    if (pages.length) {
+      const page = await notionRequest(`/pages/${pages[0].id}`, { method: "PATCH", body: JSON.stringify({ properties }) }, config);
+      // Keep legacy duplicate rows consistent so unrelated review edits cannot revive old text.
+      for (const duplicate of pages.slice(1)) {
+        await notionRequest(`/pages/${duplicate.id}`, { method: "PATCH", body: JSON.stringify({ properties }) }, config);
+        await wait(120);
+      }
+      return page;
+    }
+    setProperty(properties, findTitleProperty(source.properties), { title: richText(`${dateKey} 日报`) });
+    setProperty(properties, findProperty(source.properties, PROPERTY_ALIASES.date, ["date"]), { date: { start: dateKey } });
+    return notionRequest("/pages", { method: "POST", body: JSON.stringify({ parent: { type: "data_source_id", data_source_id: source.id }, properties }) }, config);
   }
 
   async function saveDailyCompletion(dateKey, completion, configInput) {
@@ -2265,7 +2285,11 @@
     setProperty(properties, priority, { select: { name: todo.priority || "medium" } });
     setProperty(properties, details, { rich_text: richText(todo.details) });
     setProperty(properties, source, { rich_text: richText(todo.source) });
-    setProperty(properties, estimate, { number: Math.max(0, Math.round(Number(todo.estimatedPomodoros) || 0)) });
+    setProperty(properties, estimate, { number: todo.estimatedPomodoros == null ? null : Math.max(0, Math.round(Number(todo.estimatedPomodoros) || 0)) });
+    setProperty(properties, findProperty(schema, PROPERTY_ALIASES.planningMode, ["select"]), { select: { name: todo.planningMode || "explicit" } });
+    setProperty(properties, findProperty(schema, PROPERTY_ALIASES.effortBasis, ["select"]), { select: { name: todo.effortBasis || "task_estimate" } });
+    setProperty(properties, findProperty(schema, PROPERTY_ALIASES.targetProgressPercent, ["number"]), { number: todo.targetProgressPercent ?? null });
+    setProperty(properties, findProperty(schema, PROPERTY_ALIASES.phaseTaskId, ["rich_text"]), { rich_text: richText(todo.phaseTaskId || "") });
     // A timezone-less ISO datetime is interpreted as UTC by Notion. Todo times
     // are wall-clock times chosen in the extension, so attach the device's
     // offset before writing to prevent (for example) 18:00 becoming 02:00.
@@ -2284,10 +2308,12 @@
   async function upsertDailyTodos(dateKey, todos, configInput, options = {}) {
     const config = configInput || await getConfig();
     if (!config.dailyPlanSourceId) throw new Error("请先绑定 Daily Todo 数据源。");
-    const source = await resolveDataSource(config.dailyPlanSourceId, config);
+    const todoItems = (Array.isArray(todos) ? todos : []).filter((item) => String(item?.title || "").trim());
+    if (!todoItems.length) return { created: 0, updated: 0, total: 0 };
+    const resolvedSource = await resolveDataSource(config.dailyPlanSourceId, config);
+    const { source } = await ensureWorkspaceSchema("dailyPlan", resolvedSource, config);
     const idProperty = findProperty(source.properties, PROPERTY_ALIASES.todoId, ["rich_text"]);
     const summary = { created: 0, updated: 0, total: 0 };
-    const todoItems = (Array.isArray(todos) ? todos : []).filter((item) => String(item?.title || "").trim());
     for (const [index, rawTodo] of todoItems.entries()) {
       const title = String(rawTodo?.title || "").trim();
       if (!title) continue;
@@ -2296,11 +2322,15 @@
         title,
         priority: ["high", "medium", "low"].includes(rawTodo.priority) ? rawTodo.priority : "medium",
         details: String(rawTodo.details || "").trim(),
-        source: String(rawTodo.source || "phase_plan").trim(),
-        estimatedPomodoros: Math.min(20, Math.max(0, Number(rawTodo.estimatedPomodoros) || 0)),
+        source: String(rawTodo.source ?? "phase_plan").trim(),
+        planningMode: rawTodo.planningMode || "explicit",
+        targetProgressPercent: rawTodo.targetProgressPercent ?? null,
+        phaseTaskId: rawTodo.phaseTaskId || null,
+        effortBasis: rawTodo.effortBasis || "task_estimate",
+        estimatedPomodoros: rawTodo.estimatedPomodoros === null ? null : Math.min(20, Math.max(0, Number(rawTodo.estimatedPomodoros) || 0)),
         status: ["pending", "in_progress", "done"].includes(rawTodo.status) ? rawTodo.status : "pending",
-        plannedStart: String(rawTodo.plannedStart || "").trim(),
-        plannedEnd: String(rawTodo.plannedEnd || "").trim(),
+        plannedStart: rawTodo.plannedStart === null ? null : String(rawTodo.plannedStart || "").trim(),
+        plannedEnd: rawTodo.plannedEnd === null ? null : String(rawTodo.plannedEnd || "").trim(),
         origin: rawTodo.origin === "user" ? "user" : "llm",
         adjustmentNote: String(rawTodo.adjustmentNote || "").trim(),
         phasePlanId: String(rawTodo.phasePlanId || "").trim(),
@@ -2438,18 +2468,8 @@
     if (!config.llmEndpoint || !config.llmModel || !config.llmApiKey) {
       throw new Error("请先在插件中填写 LLM 接口地址、模型 ID 和 API Key。");
     }
-    const manual = action === "daily_todo.adjust" || action === "daily_todo.adjust_repair";
-    if (!LLM_ACTION_PROMPTS[action] && !manual) throw new Error(`不支持的 LLM 操作：${action}`);
-    if (!workPolicy) throw new Error("提示词规则尚未载入，请重新加载扩展。");
-    let commonRules = action === "time_record.parse" ? LLM_RECORD_RULES : LLM_COMMON_RULES;
-    if (manual) commonRules = commonRules.replace(
-      "计划日期和时间必须符合 planningProfile 的工作窗口，并避开 routineBlocks 与 dateOverrides。",
-      "手动调整按用户明确指定的时间排程，允许覆盖常规工作窗口；仍避开 routineBlocks 与 dateOverrides。"
-    );
-    let actionRules = manual
-      ? action === "daily_todo.adjust" ? workPolicy.MANUAL_ADJUSTMENT_RULES : workPolicy.MANUAL_REPAIR_RULES
-      : LLM_ACTION_PROMPTS[action];
-    if (action === "phase_plan.decompose") actionRules = actionRules.replace("建议 6–20 个汉字", "建议 6–16 个汉字，最多 16 字");
+    if (!prompts) throw new Error("V2 提示词模块尚未载入，请重新加载扩展。");
+    const messages = prompts.buildMessages(action, payload);
     let endpoint;
     try {
       endpoint = new URL(config.llmEndpoint);
@@ -2469,12 +2489,11 @@
         },
         body: JSON.stringify({
           model: config.llmModel,
+          thinking: { type: "enabled" },
+          reasoning_effort: "medium", // DeepSeek maps medium to its actual high effort tier.
           temperature: 0.2,
           response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: `${commonRules}\n\n${actionRules}\n${workPolicy.RULES[action] || ""}` },
-            { role: "user", content: JSON.stringify({ action, version: 2, ...payload }, null, 2) },
-          ],
+          messages,
         }),
         signal: controller.signal,
       });
@@ -2494,6 +2513,9 @@
       throw new Error(`LLM 请求失败（HTTP ${response.status}）${detail ? `：${String(detail).slice(0, 300)}` : ""}`);
     }
     const result = await response.json().catch(() => null);
+    const usage = Object.fromEntries(["prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens"]
+      .filter(key => Number.isFinite(result?.usage?.[key])).map(key => [key, result.usage[key]]));
+    if (Object.keys(usage).length) global.console?.debug?.("LLM usage", { action, taskVariant: payload.taskVariant || null, promptVersion: prompts.compileSystem(action, payload.taskVariant).definition.promptVersion, ...usage });
     const content = result?.choices?.[0]?.message?.content;
     if (!content) throw new Error("LLM 返回为空或响应格式不兼容。");
     let generated;
@@ -2503,24 +2525,24 @@
       throw new Error(`LLM 没有返回合法 JSON：${String(content).slice(0, 160)}`);
     }
     try {
-      workPolicy.validateOutput(action, generated);
+      prompts.validateOutput(action, payload, generated);
     } catch (error) {
       if (error.code !== "llm_output_length" || lengthRepair) throw error;
-      return callLlm(action, { ...payload, outputLengthFeedback: error.message }, config, true);
+      return callLlm(action, { ...payload, outputLengthFeedback: error.message, previousResult: generated }, config, true);
     }
     return cleanLlmResult(action, generated);
   }
 
-  function cleanLlmText(value, limit = 2000) {
-    return String(value || "").trim().slice(0, limit);
+  function cleanLlmText(value) {
+    return String(value ?? "").trim();
   }
 
   function cleanLlmList(value) {
-    return (Array.isArray(value) ? value : []).slice(0, 20).map((item) => cleanLlmText(item)).filter(Boolean);
+    return (Array.isArray(value) ? value : []).map((item) => cleanLlmText(item));
   }
 
   function cleanMilestoneTaskEstimates(value) {
-    return (Array.isArray(value) ? value : []).slice(0, 20).map((item) => ({
+    return (Array.isArray(value) ? value : []).map((item) => ({
       title: cleanLlmText(item?.title || item?.task, 300),
       estimatedMinutes: Math.max(0, Math.round(Number(item?.estimatedMinutes) || 0)),
       deliverable: cleanLlmText(item?.deliverable || item?.outcome, 500),
@@ -2531,10 +2553,13 @@
     const taskEstimates = cleanMilestoneTaskEstimates(item?.taskEstimates || item?.tasks);
     return {
       date: cleanLlmText(item?.date, 10),
+      planningMode: item.planningMode,
+      targetProgressPercent: item.targetProgressPercent,
+      taskProgress: (item.taskProgress || []).map(task => ({ taskId: task.taskId, title: task.title, targetProgressPercent: task.targetProgressPercent })),
       goal: cleanLlmText(item?.goal || item?.title || item?.outcome),
       deliverables: cleanLlmList(item?.deliverables),
       taskEstimates,
-      estimatedMinutes: Math.max(0, Math.round(Number(item?.estimatedMinutes) || 0)),
+      estimatedMinutes: item.estimatedMinutes,
       notes: cleanLlmText(item?.notes),
     };
   }
@@ -2544,14 +2569,17 @@
       ...(todo?.id ? { id: cleanLlmText(todo.id, 100) } : {}),
       ...(todo?.externalId ? { externalId: cleanLlmText(todo.externalId, 100) } : {}),
       title: cleanLlmText(todo?.title, 200),
+      planningMode: todo.planningMode,
+      targetProgressPercent: todo.targetProgressPercent,
+      phaseTaskId: todo.phaseTaskId || null,
+      effortBasis: todo.effortBasis,
       details: cleanLlmText(todo?.details),
       priority: ["high", "medium", "low"].includes(todo?.priority) ? todo.priority : "medium",
-      estimatedPomodoros: Math.min(20, Math.max(0, Math.round(Number(todo?.estimatedPomodoros) || 0))),
-      source: cleanLlmText(todo?.source || "phase_plan", 200),
-      plannedStart: cleanLlmText(todo?.plannedStart, 40),
-      plannedEnd: cleanLlmText(todo?.plannedEnd, 40),
+      estimatedPomodoros: todo.estimatedPomodoros,
+      source: cleanLlmText(todo?.source),
+      plannedStart: todo.plannedStart,
+      plannedEnd: todo.plannedEnd,
       origin: todo?.origin === "user" ? "user" : "llm",
-      status: todo?.status === "in_progress" ? "in_progress" : "pending",
       adjustmentNote: cleanLlmText(todo?.adjustmentNote),
       workWindowOverride: todo?.workWindowOverride === true,
     })).filter((todo) => todo.title);
@@ -2582,7 +2610,7 @@
         summary: cleanLlmText(generated.summary || generated.phaseSummary),
         assumptions: cleanLlmList(generated.assumptions),
         questions: cleanLlmList(generated.questions),
-        milestones: source.slice(0, 366).map(cleanMilestone).filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date)),
+        milestones: source.map(cleanMilestone),
       };
     }
     if (action === "phase_plan.adjust") {
@@ -2590,7 +2618,7 @@
         status: cleanLlmText(generated.status || "ok", 30),
         blockedReason: cleanLlmText(generated.blockedReason),
         changeSummary: cleanLlmText(generated.changeSummary),
-        milestones: (Array.isArray(generated.milestones) ? generated.milestones : []).slice(0, 366).map(cleanMilestone).filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date)),
+        milestones: (Array.isArray(generated.milestones) ? generated.milestones : []).map(cleanMilestone),
         warnings: cleanLlmList(generated.warnings),
       };
     }
@@ -2612,8 +2640,8 @@
         blockedReason: cleanLlmText(generated.blockedReason),
         changeSummary: cleanLlmText(generated.changeSummary),
         todos: cleanLlmTodos(generated.todos || generated.nextDayTodos),
-        deletedTodoIds: cleanLlmList(generated.deletedTodoIds).slice(0, 20),
-        fixedSchedule: Array.isArray(generated.fixedSchedule) ? generated.fixedSchedule.slice(0, 20) : [],
+        deletedTodoIds: cleanLlmList(generated.deletedTodoIds),
+        fixedSchedule: Array.isArray(generated.fixedSchedule) ? generated.fixedSchedule : [],
         deferredTodos: cleanLlmList(generated.deferredTodos),
         warnings: cleanLlmList(generated.warnings),
       };
@@ -2622,14 +2650,14 @@
     return {
       status: cleanLlmText(generated.status || "ok", 30),
       blockedReason: cleanLlmText(generated.blockedReason),
-      review: {
+      review: generated.review === null ? null : {
         dailySummary: cleanLlmText(review.dailySummary),
         timeAnalysis: cleanLlmText(review.timeAnalysis),
         problemAnalysis: cleanLlmText(review.problemAnalysis),
         nextFocus: cleanLlmText(review.nextFocus),
       },
       nextDayTodos: cleanLlmTodos(generated.nextDayTodos || review.nextDayTodos),
-      fixedSchedule: Array.isArray(generated.fixedSchedule) ? generated.fixedSchedule.slice(0, 20) : [],
+      fixedSchedule: Array.isArray(generated.fixedSchedule) ? generated.fixedSchedule : [],
       deferredTodos: cleanLlmList(generated.deferredTodos),
       warnings: cleanLlmList(generated.warnings),
     };
@@ -2652,7 +2680,7 @@
     if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) throw new Error("请选择有效的补充日期。");
     if (!text) throw new Error("请描述需要补充的时间记录。");
     const existingRecords = (await loadAllLocalRecords()).filter((record) => (
-      record.dateKey === selectedDate && Number.isFinite(Number(record.start)) && Number.isFinite(Number(record.end))
+      record.dateKey === selectedDate && record.start != null && record.end != null && Number.isFinite(Number(record.start)) && Number.isFinite(Number(record.end))
     ));
     const result = await callLlm("time_record.parse", {
       selectedDate,
@@ -2666,7 +2694,7 @@
       })),
     }, config);
     if (result.status === "blocked") throw new Error(result.blockedReason || "描述中的时间信息不足，无法安全补录。");
-    if (!result.records.length) throw new Error("没有从描述中识别到可补充的时间记录。");
+    if (!result.records.length) return result;
 
     const records = result.records.map((record) => {
       const start = Date.parse(record.start);
@@ -2713,14 +2741,14 @@
       if (!Array.isArray(item.deliverables)) throw new Error(`LLM 调整结果中 ${item.date} 的 deliverables 格式无效。`);
       if (!Array.isArray(item.taskEstimates)) throw new Error(`LLM 调整结果中 ${item.date} 的 taskEstimates 格式无效。`);
       const isRestDay = /休息|缓冲|空白|不工作/.test(String(item.goal || ""));
-      if (!isRestDay && !item.taskEstimates.length) {
+      if (item.planningMode === "explicit" && item.estimatedMinutes !== null && !isRestDay && !item.taskEstimates.length) {
         throw new Error(`LLM 调整结果中 ${item.date} 的任务缺少时间预估，请重新生成。`);
       }
       if (item.taskEstimates.some((task) => !task.title || !Number.isInteger(task.estimatedMinutes) || task.estimatedMinutes <= 0)) {
         throw new Error(`LLM 调整结果中 ${item.date} 包含无效的任务时间预估。`);
       }
       const total = item.taskEstimates.reduce((sum, task) => sum + task.estimatedMinutes, 0);
-      if (item.estimatedMinutes !== total) throw new Error(`LLM 调整结果中 ${item.date} 的总时间预估不一致。`);
+      if (item.taskEstimates.length && item.estimatedMinutes !== total) throw new Error(`LLM 调整结果中 ${item.date} 的总时间预估不一致。`);
     }
     return true;
   }
@@ -2765,7 +2793,8 @@
       const [todos, review] = await Promise.all([loadDailyTodos(dateKey, config), loadDailyReview(dateKey, config)]);
       dailyContext.push({ date: dateKey, todos, review });
     }
-    const result = await callLlm("phase_plan.adjust", { today, instruction: text, plan, records, dailyContext }, config);
+    const planningProfile = await loadPlanningProfile(config);
+    const result = await callLlm("phase_plan.adjust", { today, instruction: text, plan, records, dailyContext, planningProfile }, config);
     if (result.status === "blocked") throw new Error(result.blockedReason || "当前信息不足，无法调整阶段计划。");
     const remainingStart = today < plan.startDate ? plan.startDate : today;
     validateAdjustedMilestones(result.milestones, remainingStart, plan.endDate);
@@ -2923,7 +2952,7 @@
       doneTodoCount: dailyStatistics.reduce((sum, day) => sum + day.done, 0),
       daily: dailyStatistics,
     };
-    const result = await callLlm("phase_plan.summarize", { plan, records, dailyContext, statistics }, config);
+    const result = await callLlm("phase_plan.summarize", { plan, records, dailyContext, statistics, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, asOf: now.toISOString() }, config);
     if (result.status === "blocked") throw new Error(result.blockedReason || "无法生成阶段总结。");
     const finalSummary = [
       result.phaseSummary,
@@ -3027,6 +3056,8 @@
         availableWindows: manualWindow?.availableWindows || null,
         planningProfile,
         protectedTodos,
+        todos,
+        adjustableTodos,
         requiredRescheduleTodos,
         candidateTodos: candidates,
         validationError: validationError.message,
@@ -3183,6 +3214,7 @@
       dayMilestone: milestoneForDate(phasePlan, dateKey),
       planningProfile,
       availableWindows,
+      todos,
       userCompletion: review.userCompletion || "",
       protectedTodos,
       adjustableTodos,
@@ -3206,6 +3238,7 @@
     result.deletedTodoIds = (result.deletedTodoIds || []).filter((id) => adjustableKeys.has(id));
     const validateCandidateTodos = (candidateTodos) => {
       for (const todo of candidateTodos) {
+        if (todo.effortBasis === "unknown") continue;
         const plannedStart = Date.parse(todo.plannedStart || "");
         if (!Number.isFinite(plannedStart) || plannedStart <= currentTime.getTime()) {
           throw new Error(`待办“${todo.title || "未命名"}”没有安排在 ${currentIso} 之后。`);
@@ -3241,11 +3274,17 @@
     } catch (validationError) {
       await onProgress?.({ phase: "repairing", message: `首次结果未通过时间校验，LLM 正在自动修正：${validationError.message}` });
       const repair = await callLlm("daily_todo.intraday_repair", {
+        taskVariant: "auto_delta",
         date: dateKey,
         currentTime: currentIso,
         availableWindows,
         planningProfile,
         protectedTodos,
+        todos,
+        adjustableTodos,
+        deletedTodoIds: result.deletedTodoIds,
+        phasePlan,
+        dayMilestone: milestoneForDate(phasePlan, dateKey),
         requiredRescheduleTodos,
         candidateTodos: safeIncoming,
         validationError: validationError.message,
@@ -3290,8 +3329,8 @@
     const config = configInput || await getConfig();
     const phasePlan = await loadPhasePlan(dateKey, config);
     if (!phasePlan || phasePlan.startDate !== dateKey) {
-      const error = new Error(`${dateKey} 不是阶段计划第一天，仍需先填写前一日完成情况。`);
-      error.code = "completion_required";
+      const error = new Error(`${dateKey} 不是阶段计划第一天，请使用普通日期待办生成。`);
+      error.code = "phase_milestone_required";
       throw error;
     }
     const generated = await generateDayTodos(dateKey, config, {
@@ -3322,7 +3361,7 @@
       throw error;
     }
     const planningProfile = await loadPlanningProfile(config);
-    if (!hasWorkWindowForDate(dateKey, planningProfile)) {
+    if (dayMilestone.planningMode !== "percentage" && !hasWorkWindowForDate(dateKey, planningProfile)) {
       const error = new Error(`${dateKey} 没有可用工作窗口，请先更新个人节奏。`);
       error.code = "planning_profile_required";
       throw error;
@@ -3332,7 +3371,8 @@
       dateKey,
       options.requestedAt,
       planningProfile,
-      options.preparationMinutes
+      options.preparationMinutes,
+      { allowEmptyWindows: dayMilestone.planningMode === "percentage" }
     );
     const previousDate = addDaysToDateKey(dateKey, -1);
     const [previousTodos, previousReview, previousRecords] = action === "daily_todo.initial"
@@ -3381,11 +3421,15 @@
     try {
       validateGenerated(generatedTodos);
     } catch (validationError) {
-      if (!manualWindow) throw validationError;
       const repair = await callLlm("daily_todo.intraday_repair", {
+        taskVariant: action === "daily_todo.initial" ? "initial_generate" : "day_generate",
         date: dateKey,
-        currentTime: manualWindow.earliestStart,
-        availableWindows: manualWindow.availableWindows,
+        earliestStart: manualWindow?.earliestStart || scheduledDateTimeWithLocalOffset(`${dateKey}T00:00:00`),
+        availableWindows: manualWindow?.availableWindows || (manualPlanningWindow(dateKey, `${dateKey}T00:00:00`, planningProfile, 0, { allowEmptyWindows: true })?.availableWindows || []),
+        phasePlan,
+        dayMilestone,
+        fixedSchedule: result.fixedSchedule,
+        deferredTodos: result.deferredTodos,
         planningProfile,
         protectedTodos: [],
         candidateTodos: generatedTodos,
@@ -3393,6 +3437,8 @@
       }, config);
       if (repair.status === "blocked") throw new Error(repair.blockedReason || "LLM 无法修正待办时间。");
       generatedTodos = Array.isArray(repair.todos) ? repair.todos : [];
+      result.fixedSchedule = repair.fixedSchedule;
+      result.deferredTodos = repair.deferredTodos;
       try {
         validateGenerated(generatedTodos);
       } catch (repairError) {
@@ -3409,6 +3455,7 @@
       date: dateKey,
       todoSummary,
       warnings: result.warnings || [],
+      deferredTodos: result.deferredTodos || [],
       usedPreviousContext: hasPreviousContext,
       earliestStart: manualWindow?.earliestStart || null,
     };
@@ -3436,7 +3483,7 @@
       ? `阶段计划未覆盖 ${nextTodoDate}`
       : !nextDayMilestone
         ? `阶段计划没有 ${nextTodoDate} 的每日里程碑`
-        : !hasWorkWindowForDate(nextTodoDate, planningProfile)
+        : nextDayMilestone.planningMode !== "percentage" && !hasWorkWindowForDate(nextTodoDate, planningProfile)
           ? `${nextTodoDate} 没有可用工作窗口`
           : "";
     let generateNextTodos = !nextTodoBlockedReason;
@@ -3450,6 +3497,13 @@
       timezone: planningProfile.timezone,
       userCompletion,
       phasePlan,
+      currentPhasePlan,
+      statistics: {
+        totalMinutes: records.reduce((n,r) => n + Math.max(0, (Number(r.end ?? Date.now()) - Number(r.start)) / 60000), 0),
+        workMinutes: records.filter(r=>r.type === "work").reduce((n,r) => n + Math.max(0, (Number(r.end ?? Date.now()) - Number(r.start)) / 60000), 0),
+        todoCount: todos.length,
+        doneTodoCount: todos.filter(t=>t.status === "done").length,
+      },
       nextDayMilestone,
       planningProfile,
       todos,
@@ -3462,6 +3516,7 @@
         title: getRecordTitle(record),
         evaluation: getEvaluation(record),
         note: getRecordNote(record),
+        todoId: record.todoId || "",
       })),
     };
     const result = await callLlm("daily_review.generate", payload, config);
@@ -3596,6 +3651,8 @@
       loadAllLocalRecords(),
     ]);
     const review = options.review ? { ...storedReview, ...options.review } : storedReview;
+    const localLife = (await storageGet(`minimalPomodoroLifeRecords:${dateKey}`))[`minimalPomodoroLifeRecords:${dateKey}`];
+    const lifeRecord = localLife?.pendingSync ? localLife.text : review.lifeRecord?.text ?? localLife?.text ?? "";
     const phasePlan = options.phasePlan || storedPhasePlan;
     const records = allRecords
       .filter((record) => record.dateKey === dateKey && !record.autoFilled)
@@ -3612,6 +3669,7 @@
       todos: [...todos].sort((left, right) => String(left.plannedStart || "").localeCompare(String(right.plannedStart || ""))),
       records,
       review,
+      lifeRecord,
       metrics: {
         totalMinutes,
         workMinutes,
@@ -3637,6 +3695,9 @@
       "",
       data.dayMilestone?.goal ? archiveInlineText(data.dayMilestone.goal) : "当天没有绑定阶段里程碑。",
     ];
+    for (const task of data.dayMilestone?.taskProgress || []) {
+      lines.push(`- ${archiveInlineText(task.title)}：累计预期 ${task.targetProgressPercent}%（非实际进度）`);
+    }
     if (milestoneTasks.length) {
       lines.push("", ...milestoneTasks.map((task) =>
         `- ${archiveInlineText(task.title)}（预计 ${Math.max(0, Number(task.estimatedMinutes) || 0)} 分钟）${task.deliverable ? `：${archiveInlineText(task.deliverable)}` : ""}`
@@ -3649,7 +3710,9 @@
         const schedule = todo.plannedStart && todo.plannedEnd
           ? `${archiveClock(todo.plannedStart)}–${archiveClock(todo.plannedEnd)}`
           : "未安排时间";
-        lines.push(`- [${checked}] ${archiveInlineText(todo.title)} · ${schedule} · ${statusLabel[todo.status] || todo.status || "待开始"} · 预计 ${todo.estimatedPomodoros || 0} 个番茄 · 实际投入 ${todo.actualMinutes || 0} 分钟`);
+        const effort = todo.estimatedPomodoros == null ? "投入未知" : `预计 ${todo.estimatedPomodoros} 个番茄`;
+        const target = Number.isFinite(todo.targetProgressPercent) ? ` · 累计预期目标 ${todo.targetProgressPercent}%（非实际进度）` : "";
+        lines.push(`- [${checked}] ${archiveInlineText(todo.title)} · ${schedule} · ${statusLabel[todo.status] || todo.status || "待开始"} · ${effort}${target} · 实际投入 ${todo.actualMinutes || 0} 分钟`);
         if (todo.details) lines.push(`  - 说明：${archiveInlineText(todo.details)}`);
       }
     } else {
@@ -3669,6 +3732,8 @@
     lines.push(
       "", "## 用户填写的完成情况", "",
       data.review.userCompletion || "尚未填写完成情况。",
+      "", "## 生活记录", "",
+      data.lifeRecord || "尚未填写生活记录。",
       "", "## LLM 当天总结", "",
       data.review.dailySummary || data.review.summary || "尚未生成当天总结。",
       "", "## 时间分析", "",
@@ -3699,6 +3764,9 @@
       archiveTextBlock("heading_2", "当日阶段计划"),
       archiveTextBlock("paragraph", data.dayMilestone?.goal || "当天没有绑定阶段里程碑。"),
     ];
+    for (const task of data.dayMilestone?.taskProgress || []) {
+      blocks.push(archiveTextBlock("bulleted_list_item", `${task.title}：累计预期 ${task.targetProgressPercent}%（非实际进度）`));
+    }
     for (const task of data.dayMilestone?.taskEstimates || []) {
       blocks.push(archiveTextBlock("bulleted_list_item", `${task.title}（预计 ${task.estimatedMinutes || 0} 分钟）${task.deliverable ? `：${task.deliverable}` : ""}`));
     }
@@ -3710,7 +3778,7 @@
           type: "to_do",
           to_do: {
             checked: todo.status === "done",
-            rich_text: richTextLong(`${todo.title} · ${archiveClock(todo.plannedStart)}–${archiveClock(todo.plannedEnd)} · 预计 ${todo.estimatedPomodoros || 0} 个番茄 · 实际投入 ${todo.actualMinutes || 0} 分钟`),
+            rich_text: richTextLong(`${todo.title} · ${todo.plannedStart ? `${archiveClock(todo.plannedStart)}–${archiveClock(todo.plannedEnd)}` : "尚未排程"} · ${todo.estimatedPomodoros == null ? "投入未知" : `预计 ${todo.estimatedPomodoros} 个番茄`}${Number.isFinite(todo.targetProgressPercent) ? ` · 累计预期目标 ${todo.targetProgressPercent}%（非实际进度）` : ""} · 实际投入 ${todo.actualMinutes || 0} 分钟`),
           },
         });
       }
@@ -3723,6 +3791,7 @@
     } else blocks.push(archiveTextBlock("paragraph", "当天没有时间记录。"));
     for (const [heading, content] of [
       ["用户填写的完成情况", data.review.userCompletion || "尚未填写完成情况。"],
+      ["生活记录", data.lifeRecord || "尚未填写生活记录。"],
       ["LLM 当天总结", data.review.dailySummary || data.review.summary || "尚未生成当天总结。"],
       ["时间分析", data.review.timeAnalysis || "暂无时间分析。"],
       ["问题与阻碍", data.review.problemAnalysis || "暂无问题分析。"],
@@ -3939,6 +4008,9 @@
     queueDailyTodoUpsert,
     queueDailyTodoDelete,
     queueDailyCompletion,
+    queueLifeRecord,
+    cacheLifeRecord,
+    loadLifeRecordsInRange,
     queuePlanningProfile,
     flushWriteQueue,
     normalizeNotionId,

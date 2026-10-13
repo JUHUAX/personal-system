@@ -1,6 +1,6 @@
 # Minimal Pomodoro 浏览器扩展 LLM Prompt 精确快照
 
-更新：2026-10-12。当前维护对象为浏览器扩展；Codex 插件方案已舍弃。来源：notion-client.js 和 work-prompt-policy.js。
+历史快照：2026-10-12 的 V1 提示词，原来源为 notion-client.js 和已退役的 work-prompt-policy.js。当前扩展已使用 [V2 模块化提示词](./LLM_PROMPTS_V2.md)，本文件不再代表运行中的提示词。
 
 ## 请求配置
 

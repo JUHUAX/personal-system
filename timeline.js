@@ -3,6 +3,7 @@ const recordsMode = document.getElementById("recordsMode");
 const historyGridMode = document.getElementById("historyGridMode");
 const historyTextMode = document.getElementById("historyTextMode");
 const historyInspirationMode = document.getElementById("historyInspirationMode");
+const historyLifeMode = document.getElementById("historyLifeMode");
 const historyPhaseMode = document.getElementById("historyPhaseMode");
 const summaryMode = document.getElementById("summaryMode");
 const notionMode = document.getElementById("notionMode");
@@ -19,6 +20,7 @@ const gridView = document.getElementById("gridView");
 const pomodoroView = document.getElementById("pomodoroView");
 const textView = document.getElementById("textView");
 const inspirationView = document.getElementById("inspirationView");
+const lifeView = document.getElementById("lifeView");
 const todayView = document.getElementById("todayView");
 const historyView = document.getElementById("historyView");
 const phasePlansView = document.getElementById("phasePlansView");
@@ -51,7 +53,6 @@ let timelineTypeFilterButtons = [...document.querySelectorAll(".timeline-type-fi
 const addTimelineTypeBtn = document.getElementById("addTimelineTypeBtn");
 const gridAutoFillToggle = document.getElementById("gridAutoFillToggle");
 const weekFlowGrid = document.getElementById("weekFlowGrid");
-const inspirationBoard = document.getElementById("inspirationBoard");
 const inspirationNotebook = document.getElementById("inspirationNotebook");
 const inspirationNotebookStatus = document.getElementById("inspirationNotebookStatus");
 const summary = document.getElementById("summary");
@@ -110,7 +111,11 @@ const GRID_CREATE_DEFAULT_MINUTES = 25;
 let gridCreateSession = null;
 let currentWeekStart = startOfWeek(new Date());
 let selectedTodayDate = startOfDay(new Date());
-let summarySidebarCollapsed = false;
+let summarySidebarCollapsed = true;
+let calendarScope = window.innerWidth <= 900 ? "day" : "week";
+let calendarScopeChosen = false;
+let calendarLane = "actual";
+let calendarDate = todayKey();
 let focusNowAfterRender = true;
 let loadRequestSequence = 0;
 let recordDragSession = null;
@@ -140,11 +145,26 @@ let selectedPickerMinute = 0;
 init();
 
 function init() {
+  document.addEventListener("click", (event) => {
+    const scope = event.target.closest("[data-calendar-scope]");
+    const lane = event.target.closest("[data-calendar-lane]");
+    const date = event.target.closest("[data-calendar-date]");
+    if (scope) { calendarScope = scope.dataset.calendarScope; calendarScopeChosen = true; }
+    if (lane) calendarLane = lane.dataset.calendarLane;
+    if (date) calendarDate = date.dataset.calendarDate;
+    if (scope || lane || date) applyCalendarView();
+  });
+  window.addEventListener("resize", () => {
+    if (!calendarScopeChosen) calendarScope = window.innerWidth <= 900 ? "day" : "week";
+    applyCalendarView();
+    if (!summaryView.classList.contains("hidden")) renderDashboardCharts();
+  });
   todayMode.addEventListener("click", () => refreshAndSetMode("today"));
   recordsMode.addEventListener("click", () => refreshAndSetMode(lastHistoryMode));
   historyGridMode.addEventListener("click", () => refreshAndSetMode("grid"));
   historyTextMode.addEventListener("click", () => refreshAndSetMode("text"));
   historyInspirationMode?.addEventListener("click", () => refreshAndSetMode("inspiration"));
+  historyLifeMode?.addEventListener("click", () => refreshAndSetMode("life"));
   historyPhaseMode.addEventListener("click", () => refreshAndSetMode("phases"));
   summaryMode.addEventListener("click", () => refreshAndSetMode("summary"));
   notionMode.addEventListener("click", () => refreshAndSetMode("notion"));
@@ -156,6 +176,10 @@ function init() {
   inspirationNotebook?.addEventListener("blur", () => { if (!notebookDirty) renderInspirations(); });
   window.setInterval(refreshNotebookDate, 30000);
   window.addEventListener("minimal-pomodoro-notion-contextmenu", hideTimelineContextMenu);
+  window.addEventListener("minimal-pomodoro-life-date-request", (event) => {
+    currentWeekStart = startOfWeek(parseDateKey(event.detail.dateKey));
+    loadRecords({ planningRemote: false });
+  });
   window.addEventListener("beforeunload", (event) => {
     if (notebookDirty || dirtyInspirationDates.size) { event.preventDefault(); event.returnValue = ""; }
   });
@@ -267,6 +291,16 @@ function init() {
     trigger.addEventListener("click", () => openCustomTimePicker(trigger));
   }
   customTimePicker?.addEventListener("click", handleCustomTimePickerClick);
+  customTimePicker?.addEventListener("keydown", (event) => {
+    const column = event.target.closest(".custom-time-options");
+    if (!column || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = [...column.querySelectorAll("button")];
+    const index = buttons.indexOf(event.target);
+    const change = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -6, ArrowDown: 6 }[event.key];
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, index + change));
+    buttons[next].focus();
+  });
   customTimePickerClose?.addEventListener("click", closeCustomTimePicker);
   customTimePickerDone?.addEventListener("click", closeCustomTimePicker);
   customTimePickerNow?.addEventListener("click", selectCurrentPickerTime);
@@ -288,7 +322,7 @@ function init() {
   const search = new URLSearchParams(location.search);
   const requestedMode = search.get("mode");
   document.body.classList.toggle("compact-today-window", search.get("compact") === "1");
-  if (["today", "grid", "text", "inspiration", "phases", "summary", "notion"].includes(requestedMode)) setMode(requestedMode);
+  if (["today", "grid", "text", "inspiration", "life", "phases", "summary", "notion"].includes(requestedMode)) setMode(requestedMode);
   loadCustomTimelineTypes().then(() => refreshTimelineTypeControls()).then(() => purgeLegacyAutoFilledRecords()).then(async () => {
     await loadRecords();
     if (requestedMode === "grid" || requestedMode === "text") {
@@ -402,17 +436,17 @@ function openCustomTimePicker(trigger) {
   const margin = 10;
   customTimePicker.style.left = `${Math.max(margin, Math.min(rect.right - pickerRect.width, window.innerWidth - pickerRect.width - margin))}px`;
   customTimePicker.style.top = `${Math.max(margin, Math.min(rect.bottom + 8, window.innerHeight - pickerRect.height - margin))}px`;
-  customTimePicker.querySelector(".selected")?.scrollIntoView({ block: "center" });
+  customTimePickerHours.querySelector(".selected")?.focus({ preventScroll: true });
 }
 
 function renderCustomTimePickerOptions() {
   if (!customTimePickerHours || !customTimePickerMinutes) return;
   const minuteOptions = [...new Set([...Array.from({ length: 12 }, (_, index) => index * 5), selectedPickerMinute])].sort((a, b) => a - b);
   customTimePickerHours.innerHTML = Array.from({ length: 24 }, (_, hour) =>
-    `<button type="button" data-time-hour="${hour}" class="${hour === selectedPickerHour ? "selected" : ""}">${String(hour).padStart(2, "0")}</button>`
+    `<button type="button" data-time-hour="${hour}" aria-label="${hour} 时" tabindex="${hour === selectedPickerHour ? 0 : -1}" aria-pressed="${hour === selectedPickerHour}" class="${hour === selectedPickerHour ? "selected" : ""}">${String(hour).padStart(2, "0")}</button>`
   ).join("");
   customTimePickerMinutes.innerHTML = minuteOptions.map((minute) =>
-    `<button type="button" data-time-minute="${minute}" class="${minute === selectedPickerMinute ? "selected" : ""}">${String(minute).padStart(2, "0")}</button>`
+    `<button type="button" data-time-minute="${minute}" aria-label="${minute} 分" tabindex="${minute === selectedPickerMinute ? 0 : -1}" aria-pressed="${minute === selectedPickerMinute}" class="${minute === selectedPickerMinute ? "selected" : ""}">${String(minute).padStart(2, "0")}</button>`
   ).join("");
   customTimePickerValue.textContent = `${String(selectedPickerHour).padStart(2, "0")}:${String(selectedPickerMinute).padStart(2, "0")}`;
 }
@@ -425,6 +459,7 @@ function handleCustomTimePickerClick(event) {
   if (!hourButton && !minuteButton) return;
   applyCustomTimePickerValue();
   renderCustomTimePickerOptions();
+  (hourButton ? customTimePickerHours : customTimePickerMinutes).querySelector(".selected")?.focus({ preventScroll: true });
 }
 
 function applyCustomTimePickerValue() {
@@ -816,22 +851,22 @@ function renderHeader() {
     return;
   }
 
-  if (recordsMode.classList.contains("active")) {
-    pageTitle.textContent = lastHistoryMode === "phases"
-      ? "时间记录 · 阶段计划"
-      : lastHistoryMode === "inspiration"
-        ? "时间记录 · 灵感记录"
-        : lastHistoryMode === "text" ? "时间记录 · 时间流" : "时间记录 · 时间块";
+  if (historyPhaseMode.classList.contains("active")) {
+    pageTitle.textContent = "阶段计划";
+  } else if (recordsMode.classList.contains("active")) {
+    pageTitle.textContent = "时间记录";
   } else if (summaryMode.classList.contains("active")) {
     pageTitle.textContent = "统计";
   } else if (notionMode.classList.contains("active")) {
     pageTitle.textContent = "配置";
+    dateText.textContent = "";
+    return;
   } else {
     pageTitle.textContent = "时间块";
   }
 
-  dateText.textContent = recordsMode.classList.contains("active") && lastHistoryMode === "phases"
-    ? "集中管理 Notion 中的全部阶段计划"
+  dateText.textContent = historyPhaseMode.classList.contains("active")
+    ? ""
     : recordsMode.classList.contains("active") && lastHistoryMode === "inspiration"
       ? `灵感草稿本 · ${todayKey()}`
       : `${formatDate(first)} - ${formatDate(last)}`;
@@ -846,23 +881,15 @@ function renderSummary() {
   const unclassifiedWorkSegments = work.filter(
     (record) => record.end != null && typeof record.completedNaturally !== "boolean"
   ).length;
-  const bestDay = getBestWorkDay(records);
-  const mainTask = getMainTask(records);
   const totalMinutes = records.reduce((sum, record) => sum + recordStatsMinutes(record), 0);
   const workRatio = totalMinutes > 0 ? Math.round((workMinutes / totalMinutes) * 100) : 0;
   const coverage = getRecordCoverage(records);
-  const bestWeek = getBestWeekSummary();
-  const bestWeekCompletion = bestWeek && bestWeek.minutes > 0
-    ? Math.round((workMinutes / bestWeek.minutes) * 100)
-    : 0;
 
   summary.innerHTML = `
     <div class="stat"><span>工作时长</span><strong>${formatDuration(workMinutes)}</strong></div>
     <div class="stat"><span>完整番茄</span><strong>${completedPomodoros}</strong><small>${unclassifiedWorkSegments ? `${unclassifiedWorkSegments} 条历史工作段未分类` : "自然倒计时完成"}</small></div>
-    <div class="stat"><span>最佳工作日</span><strong>${bestDay ? escapeHtml(bestDay.label) : "—"}</strong><small>${bestDay ? formatDuration(bestDay.minutes) : "暂无记录"}</small></div>
-    <div class="stat"><span>主要任务</span><strong title="${mainTask ? escapeHtml(mainTask.title) : ""}">${mainTask ? escapeHtml(mainTask.title) : "—"}</strong><small>${mainTask ? formatDuration(mainTask.minutes) : "暂无记录"}</small></div>
+    <div class="stat"><span>记录天数</span><strong>${new Set(records.map((record) => record.dateKey)).size}<small>天</small></strong></div>
     <div class="stat"><span>工作比例</span><strong>${workRatio}%</strong><small>${coverage.available ? `记录覆盖 ${coverage.ratio}% · ${coverage.days}天` : "覆盖率待更多记录"}</small></div>
-    <div class="stat"><span>相对最佳周</span><strong>${bestWeek ? `${bestWeekCompletion}%` : "—"}</strong><small>${bestWeek ? `最佳 ${formatDuration(bestWeek.minutes)}` : "暂无历史"}</small></div>
   `;
 }
 
@@ -996,7 +1023,7 @@ function renderGrid() {
     const track = document.createElement("div");
     track.className = "day-track";
     track.style.height = `${slotCount * rowHeight}px`;
-    track.style.background = `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(rowHeight - 1, 1)}px, rgba(145,190,255,0.10) ${rowHeight}px)`;
+    track.style.background = `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(rowHeight - 1, 1)}px, var(--line) ${rowHeight}px)`;
     track.dataset.dateKey = dateKey;
     track.addEventListener("pointerdown", (event) => {
       beginGridTimeBlockCreation(event, track, dateKey, range, rowHeight);
@@ -1128,11 +1155,30 @@ function renderGrid() {
     timelineGrid.appendChild(dayCol);
   }
 
+  applyCalendarView();
   updateCurrentTimeIndicator();
   if (focusNowAfterRender && !gridView.classList.contains("hidden")) {
     focusNowAfterRender = false;
     requestAnimationFrame(() => focusCurrentTime({ behavior: "smooth" }));
   }
+}
+
+function applyCalendarView() {
+  const dates = weekDates().map(toDateKey);
+  if (!dates.includes(calendarDate)) calendarDate = dates.includes(todayKey()) ? todayKey() : dates[0];
+  timelineGrid.dataset.scope = calendarScope;
+  timelineGrid.dataset.lane = calendarLane;
+  todayTimelineGrid.dataset.lane = calendarLane;
+  for (const col of timelineGrid.querySelectorAll(".day-col")) col.classList.toggle("is-grid-selected", col.dataset.dateKey === calendarDate);
+  const tabs = document.getElementById("calendarDateTabs");
+  tabs.hidden = calendarScope !== "day";
+  if (tabs.dataset.dates !== dates.join()) {
+    tabs.dataset.dates = dates.join();
+    tabs.innerHTML = weekDates().map((date) => `<button type="button" data-calendar-date="${toDateKey(date)}"><span>${weekdayName(date)}</span><strong>${date.getMonth() + 1}/${date.getDate()}</strong></button>`).join("");
+  }
+  for (const button of document.querySelectorAll("[data-calendar-scope]")) button.setAttribute("aria-pressed", String(button.dataset.calendarScope === calendarScope));
+  for (const button of document.querySelectorAll("[data-calendar-lane]")) button.setAttribute("aria-pressed", String(button.dataset.calendarLane === calendarLane));
+  for (const button of tabs.children) button.setAttribute("aria-pressed", String(button.dataset.calendarDate === calendarDate));
 }
 
 function updateTimelineFilterStatus(allRecords, visibleRecords) {
@@ -1429,6 +1475,7 @@ function openTimelineContextMenu(event, displayRecord) {
   const copyButton = timelineContextMenu.querySelector('[data-action="copy"]');
   const deleteButton = timelineContextMenu.querySelector('[data-action="delete"]');
   const startButton = timelineContextMenu.querySelector('[data-action="start-pomodoro"]');
+  timelineContextMenu.querySelector('[data-action="edit"]').disabled = autoFilled;
 
   timelineContextMenuTitle.textContent =
     members.length > 1
@@ -1478,6 +1525,9 @@ async function handleTimelineContextMenuAction(event) {
     await deleteDisplayRecord(displayRecord);
   } else if (action === "start-pomodoro") {
     await startPomodoroFromRecord(displayRecord);
+  } else if (action === "edit") {
+    const member = getDisplayRecordMembers(displayRecord)[0] || displayRecord;
+    fillForm(member.dateKey, member.id);
   }
 }
 
@@ -1741,16 +1791,9 @@ function flowDayCardHtml(date, displayRecords, extraClass = "") {
     const dateKey = toDateKey(date);
     const dayRecords = displayRecords.filter((record) => record.dateKey === dateKey);
     const today = todayKey();
-    let tomato = 0;
     const timelineItems = dayRecords.map((record) => {
-      let label = getTextLabel(record, tomato);
-      if (record.type === "work") {
-        const first = tomato + 1;
-        tomato += record.mergedCount || 1;
-        label = first === tomato
-          ? `🍅${first}：${record.content || "工作"}`
-          : `🍅${first}-${tomato}：${record.content || "工作"}`;
-      }
+      const label = record.content || defaultContent(record.type);
+      const icon = { work: "briefcase", break: "coffee", life: "house", entertainment: "gamepad-2" }[record.type] || "circle";
       const sourceRecords = record.mergedRecords?.length ? record.mergedRecords : [record];
       const primaryRecord = sourceRecords[0];
       const reviewText = record.type === "work" ? compactReviewText(record) : "";
@@ -1761,7 +1804,7 @@ function flowDayCardHtml(date, displayRecords, extraClass = "") {
           data-merged-ids="${escapeHtml(sourceRecords.map((item) => item.id).join(","))}"
           title="点击查看或编辑记录">
           <time>${formatTime(record.start)}–${formatTime(record.end || Date.now())}</time>
-          <strong>${escapeHtml(label)}</strong>
+          <strong><span data-icon="${icon}" aria-hidden="true"></span>${escapeHtml(label)}</strong>
           <small>${formatCompactDurationFromMs(durationMs(record))}</small>
           ${reviewText ? `<span class="flow-record-review">${escapeHtml(reviewText)}</span>` : ""}
         </div>`;
@@ -1797,6 +1840,12 @@ function flowDayCardHtml(date, displayRecords, extraClass = "") {
           <small class="flow-save-state" data-flow-role="completion-status" data-state="idle" role="status" aria-live="polite">修改后请点击保存，内容将写入 Notion</small>
         </section>
 
+        <section class="flow-section flow-life-section">
+          <div class="flow-section-head"><h3>生活记录</h3><span>每日随记</span></div>
+          <textarea data-life-date="${escapeHtml(dateKey)}" rows="5" aria-label="${escapeHtml(dateKey)} 生活记录" placeholder="昨晚睡得怎么样？今天吃了什么、心情如何、有没有喝甜水…"></textarea>
+          <small class="flow-save-state" data-life-status="${escapeHtml(dateKey)}" role="status" aria-live="polite"></small>
+        </section>
+
         <section class="flow-section flow-inspiration-section">
           <div class="flow-section-head"><h3>灵感记录</h3><span>每日速记</span></div>
           <textarea data-flow-role="inspiration" data-date-key="${escapeHtml(dateKey)}" rows="4" placeholder="记录今天冒出来的想法、线索、问题或下一步实验。">${escapeHtml(inspirationsByDate[dateKey] || "")}</textarea>
@@ -1823,6 +1872,7 @@ function renderInspirations() {
   inspirationNotebook.value = InspirationNotebook.serialize(inspirationsByDate, notebookDate);
   notebookProtectedDates = Object.keys(inspirationsByDate).filter((date) =>
     date !== notebookDate && String(inspirationsByDate[date] || "").trim());
+  window.dispatchEvent(new Event("personal-system-notebook-rendered"));
 }
 
 function refreshNotebookDate() {
@@ -1831,6 +1881,7 @@ function refreshNotebookDate() {
   try {
     InspirationNotebook.parse(inspirationNotebook.value, notebookDate, notebookProtectedDates);
     inspirationNotebook.value = InspirationNotebook.rollover(inspirationNotebook.value, notebookDate, currentDate);
+    window.dispatchEvent(new Event("personal-system-notebook-rendered"));
     notebookDate = currentDate;
     notebookProtectedDates = Object.keys(inspirationsByDate).filter((date) =>
       date !== currentDate && String(inspirationsByDate[date] || "").trim());
@@ -1942,6 +1993,7 @@ function renderToday() {
     return;
   }
   todayTimelineGrid.append(timeColumn.cloneNode(true), todayColumn.cloneNode(true));
+  applyCalendarView();
   updateCurrentTimeIndicator();
   if (todayFocusPending && !todayView.classList.contains("hidden")) {
     todayFocusPending = false;
@@ -2135,7 +2187,7 @@ function renderList() {
       <div class="item-title">
         <span class="pill ${record.type}">${typeName(record.type)}</span>${escapeHtml(record.content || defaultContent(record.type))}
       </div>
-      <div class="item-meta">${record.dateKey} · ${formatTime(record.start)}-${formatTime(record.end || Date.now())}${record.round ? ` · 第 ${record.round} 轮` : ""}</div>
+      <div class="item-meta">${record.dateKey} · ${formatTime(record.start)}-${formatTime(record.end || Date.now())}</div>
     `;
 
     const actions = document.createElement("div");
@@ -2181,22 +2233,25 @@ function setMode(mode) {
   const grid = mode === "grid";
   const text = mode === "text";
   const inspiration = mode === "inspiration";
+  const life = mode === "life";
   const phases = mode === "phases";
-  const history = grid || text || inspiration || phases;
+  const history = grid || text || inspiration || life || phases;
   const summary = mode === "summary";
   const notion = mode === "notion";
   document.body.classList.toggle("today-page-active", today);
   document.body.classList.toggle("history-page-active", history);
   document.body.classList.toggle("phase-plans-page-active", phases);
   document.body.classList.toggle("inspiration-page-active", inspiration);
+  document.body.classList.toggle("life-page-active", life);
 
-  if (history) lastHistoryMode = mode;
+  if (history && !phases) lastHistoryMode = mode;
 
   todayMode.classList.toggle("active", today);
-  recordsMode.classList.toggle("active", history);
+  recordsMode.classList.toggle("active", history && !phases);
   historyGridMode.classList.toggle("active", grid);
   historyTextMode.classList.toggle("active", text);
   historyInspirationMode?.classList.toggle("active", inspiration);
+  historyLifeMode?.classList.toggle("active", life);
   historyPhaseMode.classList.toggle("active", phases);
   summaryMode.classList.toggle("active", summary);
   notionMode.classList.toggle("active", notion);
@@ -2207,11 +2262,17 @@ function setMode(mode) {
   gridView.classList.toggle("hidden", !grid);
   textView.classList.toggle("hidden", !text);
   inspirationView?.classList.toggle("hidden", !inspiration);
+  lifeView?.classList.toggle("hidden", !life);
   phasePlansView.classList.toggle("hidden", !phases);
   summaryView.classList.toggle("hidden", !summary);
   notionView.classList.toggle("hidden", !notion);
   renderHeader();
+  for (const button of [todayMode, recordsMode, historyPhaseMode, summaryMode, notionMode]) {
+    if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
   window.dispatchEvent(new CustomEvent("minimal-pomodoro-mode-change", { detail: { mode } }));
+  if (summary) renderDashboardCharts();
 }
 
 function applySummarySidebarState() {
@@ -2241,9 +2302,9 @@ function toggleSummarySidebar() {
 function restoreSummarySidebarState() {
   try {
     summarySidebarCollapsed =
-      localStorage.getItem("minimalPomodoroSummarySidebarCollapsed") === "1";
+      localStorage.getItem("minimalPomodoroSummarySidebarCollapsed") !== "0";
   } catch {
-    summarySidebarCollapsed = false;
+    summarySidebarCollapsed = true;
   }
   applySummarySidebarState();
 }
@@ -2358,6 +2419,11 @@ async function submitSupplementRecords(event) {
   setSupplementRecordStatus("working", "LLM 正在识别时间、类型和记录内容。");
   try {
     const parsed = await api.parseNaturalLanguageTimeRecords(dateKey, instruction);
+    if (!parsed.records.length) {
+      setBackupStatus("没有需要新增的时间记录；已有记录已保留，未重复补录。");
+      supplementRecordOverlay.classList.add("hidden");
+      return;
+    }
     const generated = parsed.records.map((record, index) => ({
       id: `manual-backfill:${dateKey}:${Date.now().toString(36)}:${index}`,
       type: record.type,
@@ -2740,8 +2806,8 @@ function createWeeklyBarChart(weeks) {
     return `<div class="chart-empty">最近六周还没有工作记录</div>`;
   }
 
-  const width = 760;
-  const height = 230;
+  const width = Math.max(240, weeklyCompareChart.clientWidth || 760);
+  const height = 200;
   const plotTop = 30;
   const plotBottom = height - 48;
   const max = Math.max(...weeks.map((week) => week.minutes), 1);
@@ -2774,13 +2840,13 @@ function createHourlyBarChart(hourly) {
     return `<div class="chart-empty">这一周还没有工作时段数据</div>`;
   }
 
-  const width = 760;
-  const height = 220;
+  const width = Math.max(240, workTimeDistributionChart.clientWidth || 760);
+  const height = 200;
   const plotTop = 28;
   const plotBottom = height - 42;
   const max = Math.max(...hourly, 1);
   const slotWidth = (width - 72) / 24;
-  const barWidth = Math.max(8, slotWidth - 7);
+  const barWidth = Math.max(2, slotWidth * 0.65);
 
   return `
     <svg class="chart-svg hourly-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="每小时工作时长分布图">
@@ -3213,9 +3279,10 @@ function renderSummaryDetails() {
   daySummary.innerHTML = days.map((day) => {
     const dateKey = toDateKey(day);
     const dayRecords = records.filter((record) => record.dateKey === dateKey);
+    if (!dayRecords.length) return "";
     const stats = buildPeriodStats(dayRecords);
     const title = `${weekdayName(day)} · ${String(day.getMonth() + 1).padStart(2, "0")}/${String(day.getDate()).padStart(2, "0")}`;
-    return renderPeriodSummaryCard(title, stats, { compact: true });
+    return `<details class="daily-summary"><summary><span>${escapeHtml(title)}</span><strong>${formatDuration(stats.work.totalMinutes)}</strong></summary>${renderPeriodSummaryCard(title, stats)}</details>`;
   }).join("");
 }
 
@@ -3407,14 +3474,6 @@ function renderPeriodSummaryCard(title, stats) {
       </div>
 
       <div class="summary-section">
-        <h4>质量统计</h4>
-        <div class="summary-line"><span>已评价 / 待评价 / 已跳过</span><strong>${stats.quality.reviewed} / ${stats.quality.pending} / ${stats.quality.skipped}</strong></div>
-        <div class="summary-line"><span>完成度 高 / 中 / 低</span><strong>${stats.quality.completion.high} / ${stats.quality.completion.medium} / ${stats.quality.completion.low}</strong></div>
-        <div class="summary-line"><span>专注度 好 / 一般 / 差</span><strong>${stats.quality.focus.good} / ${stats.quality.focus.normal} / ${stats.quality.focus.poor}</strong></div>
-        <div class="summary-line"><span>打断 无 / 轻微 / 严重</span><strong>${stats.quality.interruption.none} / ${stats.quality.interruption.light} / ${stats.quality.interruption.severe}</strong></div>
-      </div>
-
-      <div class="summary-section">
         <h4>生活记录</h4>
         ${lifeLines}
       </div>
@@ -3437,15 +3496,6 @@ function reviewTooltipHtml(record) {
   }
 
   return record.reviewNote ? `<div class="tooltip-note">完成情况：${escapeHtml(record.reviewNote)}</div>` : "";
-}
-
-function reviewLabel(group, value) {
-  const labels = {
-    completion: { low: "低", medium: "中", high: "高" },
-    focus: { poor: "差", normal: "一般", good: "好" },
-    interruption: { none: "无", light: "轻微", severe: "严重" },
-  };
-  return labels[group]?.[value] || value || "";
 }
 
 function formatCompactDurationFromMs(milliseconds) {
@@ -3703,10 +3753,6 @@ function inspirationStorageKey(dateKey = todayKey()) {
   return `minimalPomodoroInspirations:${dateKey}`;
 }
 
-function normalizeInspirationText(value) {
-  return String(value || "").replace(/\r\n/g, "\n").trim();
-}
-
 function toDateKey(date) {
   const d = new Date(date);
   const y = d.getFullYear();
@@ -3734,10 +3780,6 @@ function formatDate(date) {
     day: "numeric",
     weekday: "short",
   });
-}
-
-function formatMonthDay(date) {
-  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function formatWeekRange(weekStart) {

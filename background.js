@@ -1,4 +1,4 @@
-importScripts("work-prompt-policy.js", "notion-client.js");
+importScripts("llm-prompt-registry.js", "llm-prompt-examples.js", "llm-prompt-contracts.js", "llm-prompts.js", "notion-client.js");
 const notionIntegration = globalThis.MinimalPomodoroNotion;
 
 let controllerTabId = null;
@@ -412,6 +412,7 @@ function todoAutoCompleteThresholdMinutes(todo) {
 }
 
 function todoEstimatedMinutes(todo) {
+  if (todo.planningMode === "percentage" || todo.effortBasis === "time_budget" || todo.effortBasis === "unknown") return 0;
   const pomodoros = Number(todo.estimatedPomodoros);
   if (Number.isFinite(pomodoros) && pomodoros > 0) return pomodoros * 25;
   const start = Date.parse(todo.plannedStart);

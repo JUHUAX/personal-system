@@ -1,75 +1,52 @@
 # Notion 与 LLM 集成说明
 
-此集成不改变番茄钟计时、完成判定、评价或 Dashboard 统计逻辑。
+适用于当前浏览器扩展。日常安装与操作见 [README.md](./README.md)，当前提示词及完整快照见 [LLM_PROMPTS_V2.md](./LLM_PROMPTS_V2.md)。V2 待办保存时会补充缺失的“规划方式”“累计计划百分比”“投入依据”“阶段任务 ID”等字段；同名但类型不兼容时停止，不覆盖原字段。阶段计划继续用“每日里程碑 JSON”保存taskProgress，不新增阶段数据库或改写旧计划。
 
 ## 初始化
 
-在时间轴的 `Notion` 模式填写 Token 和已共享给 Integration 的父页面，然后点击“检查并初始化工作区”。插件会按标题、字段别名和类型复用已有数据源，补充缺失字段，或创建以下 5 个数据库。旧版 Weekly Plan/Daily Plan 可原位升级。
+在“配置”中填写 Notion Token 及已授权给该连接的父页面，点击“检查并初始化工作区”，再测试连接。
 
-## 默认数据库
+初始化按名称、字段别名和类型复用已有数据源，补充缺失字段；找不到兼容数据源时创建以下六库。不引入 Relation/Rollup，使用稳定的 Rich text ID 关联与查重。
 
-### Phase Plan
+## 数据源
 
-| 字段 | 类型 |
-|---|---|
-| 阶段计划 | Title |
-| 计划 ID | Rich text |
-| 开始日期 / 结束日期 | Date |
-| 计划描述 / 约束与说明 | Rich text |
-| 每日里程碑 JSON | Rich text |
-| 状态 | Select |
+| 数据源 | 保存内容 |
+| --- | --- |
+| Phase Plan | 稳定计划 ID、名称、日期范围、描述、约束、每日里程碑 JSON、调整记录、阶段总结、生成时间和状态 |
+| Planning Profile | Profile ID、时区、工作窗口和固定安排摘要、习惯说明、完整配置 JSON、更新时间 |
+| Daily Todo | 待办 ID、日期、标题、说明、状态、优先级、计划起止时间、预计番茄数、真实投入、来源及阶段计划关联 |
+| Time Record | 记录 ID、标题、真实起止时间、类型、时长、评价/备注和待办关联 |
+| Daily Review | 日期、用户完成情况、独立的生活记录原文、当天总结、时间分析、问题分析、次日关注及阶段计划关联 |
+| Daily Archive | 归档 ID、日期、阶段计划关联、时间/待办统计、文档版本和完整当日归档 |
 
-### Planning Profile
+源码中的 `weeklyPlanSourceId`、`dailyPlanSourceId` 及旧数据库/字段别名用于读取已有配置和数据。虽然界面已改称“阶段计划 / 每日待办”，这些兼容项不能作为过时代码删除。
 
-| 字段 | 类型 |
-|---|---|
-| 配置名称 | Title |
-| Profile ID / 时区 | Rich text |
-| 工作窗口摘要 / 固定安排摘要 / 习惯说明 | Rich text |
-| 配置 JSON | Rich text |
-| 更新时间 | Date |
+## 同步与删除
 
-### Daily Todo
+- 计时和灵感本地保存；时间记录只同步已结束的真实记录，不同步运行段和虚拟空白块。
+- 待办、用户完成情况与个人节奏的手工修改先更新本地缓存、进入持久化队列，再定时或手动写入；同一对象的连续修改合并。
+- 阶段计划、待办、复盘及归档由扩展读写 Notion；模型结果须先通过日期、时间冲突和字段校验。
+- 时间记录支持推送和拉取；拉取使用稳定 ID 与同步指纹，已有本地改动不会被直接覆盖。
+- 本地删除真实时间块会保存删除标记，并在后续推送时移入 Notion 回收站；拉取不会使其复活。云端删除经确认已进回收站后才移除对应本地记录，权限错误或暂时 404 不作为删除依据。
+- 灵感目前只在浏览器本地保存，不因 Notion 已连接而自动同步。其他设备需分别填写授权与模型设置。
+- 生活记录按日期自动保存原文并进入同一持久化队列；首次写入会补齐 Daily Review 的“生活记录”Rich text 字段，只修改该字段。今日/时间流读取当日记录，生活记录子页面按周拉取，未保存与待同步内容不会被云端旧文本覆盖。清空原文也同步清空；旧版本同日重复行同步更新，防止旧文重现。每日归档包含生活原文，不调用模型分析生活习惯。
+- Notion 页面入口在对应内容的右键菜单中，只开放有效的 Notion HTTPS 链接。
 
-| 字段 | 类型 |
-|---|---|
-| 待办 | Title |
-| 待办 ID / 说明 / 来源 / 调整说明 | Rich text |
-| 日期 | Date |
-| 状态 / 优先级 / Origin | Select |
-| 计划时间 | Date（start + end） |
-| 预计番茄数 / 实际投入分钟 / 实际番茄数 | Number |
+## LLM 契约
 
-### Time Record
+请求使用 `version: 2`，每次只发送当前动作的规则与所需上下文。共 11 个动作：
 
-标题、记录 ID、时间、类型、持续时间、评价、备注、待办 ID、待办链接。它只接受本地真实记录的单向同步。
+- 阶段拆分/调整/总结：`phase_plan.decompose`、`phase_plan.adjust`、`phase_plan.summarize`。
+- 每日/首日待办：`daily_todo.generate`、`daily_todo.initial`。
+- 手动调整及定向修复：`daily_todo.adjust`、`daily_todo.adjust_repair`。
+- 日内自动调整及修复：`daily_todo.intraday_adjust`、`daily_todo.intraday_repair`。
+- 每日复盘：`daily_review.generate`。
+- 自然语言补录：`time_record.parse`。
 
-### Daily Review
+接口必须为兼容 Chat Completions 的 HTTPS 地址；输出严格 JSON。调用方检查字段、字数、日期及排程后再写入。超长最多请求精简一次，不截断后写入。单次 LLM 请求超时 60 秒，单次 Notion 请求超时 30 秒。
 
-标题、日期、用户完成情况、今日总结、时间分析、问题分析、次日关注点。用户完成情况是调用每日生成的强制前置条件。
-
-## 同步边界
-
-- 插件前端直接读写 Phase Plan、Planning Profile、Daily Todo 与 Daily Review。
-- Time Record 只从本地单向新增/更新到 Notion；本地删除不自动删除 Notion 页面。
-- 不同步正在运行或自动补全的“未记录时间”。
-- Rich text ID 用于轻量查重和跨设备稳定识别，不使用 Relation/Rollup。
-- 用户可在 Notion 修改待办，插件重新读取时会载入；主要编辑入口仍是插件前端。
-
-## LLM 直连契约
-
-所有请求使用 `version: 2`，并由 `action` 区分：
-
-- `phase_plan.decompose`
-- `daily_review.generate`
-- `daily_todo.adjust`
-
-插件直接调用 OpenAI-compatible Chat Completions API，在本地完成 action 路由、Prompt 选择、JSON 解析和结果清洗，然后由插件写入 Notion。Notion Token 不会发送给模型服务商。完整输入输出见 [LLM_PROMPTS_V1.md](./LLM_PROMPTS_V1.md)。
+用户完成情况是每日复盘的核心输入；可以保存空文本以清空旧内容，但生成复盘时须有非空内容。次日条件不足只跳过次日待办，不丢弃当天总结。模型不能将待办自行标记为完成。
 
 ## 安全
 
-- Notion Token 和 LLM API Key 不写入源码或导出文件。
-- 两类密钥均保存在本机 `chrome.storage.local`，不会自动同步到其他设备。
-- LLM 接口必须使用 HTTPS；共享电脑应使用独立浏览器用户配置。
-
-完整安装与使用流程见 [PRODUCTIVITY_WORKFLOW_README.md](./PRODUCTIVITY_WORKFLOW_README.md)。
+Notion Token 和 LLM API Key 分别只发给对应服务；Notion Token 不发给模型。密钥保存在本机浏览器的 `chrome.storage.local`，不自动共享到其他设备、不写源码。个人记录和设置导出仍可能含敏感内容，不应上传公开仓库。

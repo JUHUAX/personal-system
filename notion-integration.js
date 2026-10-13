@@ -158,6 +158,7 @@
     window.addEventListener("minimal-pomodoro-mode-change", handleModeChange);
     window.addEventListener("minimal-pomodoro-week-flow-rendered", handleWeekFlowRendered);
     window.addEventListener("minimal-pomodoro-open-grid-todo", handleGridTodoOpen);
+    window.addEventListener("minimal-pomodoro-todo-menu-action", handleTodoMenuAction);
     elements.weekFlowGrid?.addEventListener("click", handleFlowAction);
     elements.weekFlowGrid?.addEventListener("input", handleFlowInput);
     elements.todayFlowGrid?.addEventListener("click", handleFlowAction);
@@ -548,6 +549,7 @@
       card.classList.toggle("is-selected", selected);
       card.setAttribute("aria-selected", String(selected));
     }
+    globalThis.PersonalSystemWorkspace?.updateFlowTabs(selectedFlowDate);
   }
 
   async function selectFlowDate(dateKey) {
@@ -1123,6 +1125,7 @@
   }
 
   function renderFlowDayData(dateKey, todos, review, archive, config, fromCache = false) {
+    if (!fromCache && review.lifeRecord) window.DailyLifeRecords?.acceptRemote(dateKey, review.lifeRecord).catch(() => {});
     flowTodosByDate.set(dateKey, todos);
     renderFlowTodos(dateKey, todos);
     renderFlowReview(dateKey, review, archive, Boolean(config.dailyArchiveSourceId));
@@ -1222,6 +1225,7 @@
   }
 
   function todoEstimatedMinutes(todo) {
+    if (todo.planningMode === "percentage" || todo.effortBasis === "time_budget" || todo.effortBasis === "unknown") return 0;
     const pomodoros = Number(todo.estimatedPomodoros);
     if (Number.isFinite(pomodoros) && pomodoros > 0) return pomodoros * 25;
     const start = Date.parse(todo.plannedStart);
@@ -1315,6 +1319,7 @@
 
   function renderPhaseDatabase(plans) {
     if (!elements.phasePlansDatabase) return;
+    document.getElementById("phasePlanCount").textContent = `${plans.length} 个计划`;
     if (!plans.length) {
       elements.phasePlansDatabase.innerHTML = '<div class="notion-empty">还没有阶段计划，点击“新增阶段计划”开始创建。</div>';
       return;
@@ -1325,7 +1330,7 @@
       const current = plan.startDate <= today && today <= plan.endDate && plan.status !== "completed";
       const statusLabel = current ? "进行中" : plan.status === "completed" || plan.endDate < today ? "已结束" : "未开始";
       return `
-        <article class="phase-database-card${current ? " is-current" : ""}" data-phase-page-id="${escapeNotionHtml(plan.id)}" data-notion-url="${escapeNotionHtml(plan.url || "")}">
+        <article class="phase-database-card${current ? " is-current" : ""}" data-phase-state="${current ? "active" : statusLabel === "已结束" ? "completed" : "upcoming"}" data-phase-page-id="${escapeNotionHtml(plan.id)}" data-notion-url="${escapeNotionHtml(plan.url || "")}">
           <header>
             <div><span>${escapeNotionHtml(statusLabel)}</span><h3>${escapeNotionHtml(plan.title || "阶段计划")}</h3></div>
             <time>${escapeNotionHtml(plan.startDate)} → ${escapeNotionHtml(plan.endDate)}</time>
@@ -1334,8 +1339,7 @@
           <div class="phase-database-meta"><span>${milestones.length} 个每日里程碑</span>${plan.finalSummary ? "<span>已生成阶段总结</span>" : ""}</div>
           <div class="phase-database-actions">
             <button class="ghost" type="button" data-phase-db-detail>查看详情</button>
-            <button class="ghost" type="button" data-phase-db-edit>编辑</button>
-            <button class="danger" type="button" data-phase-db-delete>删除</button>
+            <details class="inline-menu"><summary data-icon="ellipsis" aria-label="更多计划操作" title="更多计划操作"></summary><div><button class="ghost" type="button" data-phase-db-edit data-icon="pencil">编辑</button><button class="danger" type="button" data-phase-db-delete data-icon="trash-2">删除</button></div></details>
           </div>
           <div class="phase-database-detail hidden">
             <section class="phase-detail-section">
@@ -1343,8 +1347,8 @@
               ${plan.finalSummary ? renderPhaseSummaryBlocks(plan.finalSummary) : '<p>尚未生成阶段总结。</p>'}
             </section>
             <section class="phase-detail-section">
-              <strong>LLM 每日计划</strong>
-              ${milestones.length ? `<ol>${milestones.map((item) => `<li><time>${escapeNotionHtml(item.date || "")}</time><span>${escapeNotionHtml(item.goal || "未命名里程碑")}${Number(item.estimatedMinutes) > 0 ? ` · 预计 ${escapeNotionHtml(item.estimatedMinutes)} 分钟` : ""}</span></li>`).join("")}</ol>` : '<p>尚无 LLM 拆分结果。</p>'}
+              <strong>每日计划</strong>
+              ${milestones.length ? `<ol>${milestones.map((item) => `<li><time>${escapeNotionHtml(item.date || "")}</time><span>${escapeNotionHtml(item.goal || "未命名里程碑")}${Number(item.estimatedMinutes) > 0 ? ` · 预计 ${escapeNotionHtml(item.estimatedMinutes)} 分钟` : ""}${renderMilestoneProgress(item)}</span></li>`).join("")}</ol>` : '<p>尚无 LLM 拆分结果。</p>'}
             </section>
             <section class="phase-detail-section">
               <strong>约束与说明</strong>
@@ -1356,17 +1360,30 @@
   }
 
   function renderPhaseSummaryBlocks(summary) {
-    const blocks = String(summary || "")
-      .split(/\n{2,}|\n(?=\s*(?:[-*]|\d+[.)]|[一二三四五六七八九十]+[、.]))/)
-      .map((block) => block.replace(/^[-*\d.)\s一二三四五六七八九十、.]+/, "").trim())
-      .filter(Boolean);
-    const compactBlocks = blocks.length > 1
-      ? blocks
-      : String(summary || "")
-        .split(/(?<=[。！？!?])\s*/)
-        .map((block) => block.trim())
-        .filter(Boolean);
-    return `<div class="phase-final-summary">${compactBlocks.map((block) => `<p>${escapeNotionHtml(block)}</p>`).join("")}</div>`;
+    const knownHeading = /^(主要成果|阶段成果|完成情况|计划偏差|未完成事项|问题与原因|下一步|后续计划|阶段回顾|本阶段总结)[：:]?\s*(.*)$/;
+    const blocks = [];
+    let listOpen = false;
+    for (const raw of String(summary || "").split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) { if (listOpen) { blocks.push("</ul>"); listOpen = false; } continue; }
+      const markdown = line.match(/^#{1,6}\s+(.+)$/);
+      const cleaned = line.replace(/^\*\*(.+)\*\*$/, "$1");
+      const heading = cleaned.match(knownHeading);
+      const item = line.match(/^(?:[-*]\s+|\d+[.)、]\s*)(.+)$/);
+      if (heading || markdown) {
+        if (listOpen) { blocks.push("</ul>"); listOpen = false; }
+        blocks.push(`<h4>${escapeNotionHtml(markdown ? markdown[1] : heading[1])}</h4>`);
+        if (heading?.[2]) blocks.push(`<p>${escapeNotionHtml(heading[2])}</p>`);
+      } else if (item) {
+        if (!listOpen) { blocks.push("<ul>"); listOpen = true; }
+        blocks.push(`<li>${escapeNotionHtml(item[1])}</li>`);
+      } else {
+        if (listOpen) { blocks.push("</ul>"); listOpen = false; }
+        blocks.push(`<p>${escapeNotionHtml(line)}</p>`);
+      }
+    }
+    if (listOpen) blocks.push("</ul>");
+    return `<div class="phase-final-summary">${blocks.join("")}</div>`;
   }
 
   function handlePhaseDatabaseAction(event) {
@@ -1375,10 +1392,7 @@
     const plan = allPhasePlans.find((item) => item.id === card.dataset.phasePageId);
     if (!plan) return;
     if (event.target.closest("[data-phase-db-detail]")) {
-      const detail = card.querySelector(".phase-database-detail");
-      detail?.classList.toggle("hidden");
-      const button = event.target.closest("[data-phase-db-detail]");
-      if (button && detail) button.textContent = detail.classList.contains("hidden") ? "查看详情" : "收起详情";
+      globalThis.PersonalSystemWorkspace?.showPhaseDetails(card, plan);
       return;
     }
     if (event.target.closest("[data-phase-db-edit]")) return openPhaseMetadataEditor(plan);
@@ -1508,15 +1522,9 @@
       const priority = ({ high: "高", medium: "中", low: "低" })[todo.priority] || "中";
       const status = ({ pending: "待开始", in_progress: "进行中", done: "已完成" })[todo.status] || todo.status;
       return `
-        <article class="flow-todo-item" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}" data-notion-url="${escapeNotionHtml(todo.url || "")}">
-          <strong>${escapeNotionHtml(todo.title)}${todo.pendingSync ? '<span class="pending-sync-badge">待同步</span>' : ""}</strong>
-          <small>${escapeNotionHtml(formatTodoSchedule(todo))} · ${priority}优先级 · ${escapeNotionHtml(status)} · 预计 ${todo.estimatedPomodoros || "—"} 个番茄</small>
-          <div class="flow-todo-actions">
-            <button type="button" data-flow-action="start-todo" data-todo-id="${escapeNotionHtml(todo.id)}">开始</button>
-            <button type="button" data-flow-action="edit-todo" data-todo-id="${escapeNotionHtml(todo.id)}">编辑</button>
-            ${todo.status !== "done" ? `<button type="button" data-flow-action="done-todo" data-todo-id="${escapeNotionHtml(todo.id)}">完成</button>` : ""}
-            <button type="button" data-flow-action="delete-todo" data-todo-id="${escapeNotionHtml(todo.id)}">删除</button>
-          </div>
+        <article class="flow-todo-item" tabindex="0" data-todo-id="${escapeNotionHtml(todo.id)}" data-priority="${escapeNotionHtml(todo.priority)}" data-status="${escapeNotionHtml(todo.status)}" data-notion-url="${escapeNotionHtml(todo.url || "")}">
+          <label class="flow-todo-heading"><input class="flow-todo-check" type="checkbox" data-flow-action="toggle-todo" data-todo-id="${escapeNotionHtml(todo.id)}" ${todo.status === "done" ? "checked" : ""} aria-label="${escapeNotionHtml(`完成：${todo.title}`)}" /><strong>${escapeNotionHtml(todo.title)}${todo.pendingSync ? '<span class="pending-sync-badge">待同步</span>' : ""}</strong></label>
+          <small>${escapeNotionHtml(formatTodoSchedule(todo))} · ${priority}优先级 · ${escapeNotionHtml(status)} · ${escapeNotionHtml(formatTodoEffort(todo))}</small>
         </article>`;
     }).join("");
     for (const list of lists) list.innerHTML = html;
@@ -1644,9 +1652,28 @@
     const todo = currentTodos.find((item) => item.id === button.dataset.todoId);
     if (!todo) return;
     if (action === "edit-todo") return openTodoEditor(todo);
+    if (action === "toggle-todo") {
+      button.disabled = true;
+      await updateTodoStatus(todo.id, button.checked ? "done" : "pending");
+      // A failed write must not leave an unsaved checkmark on screen.
+      renderFlowTodos(dateKey, flowTodosByDate.get(dateKey) || []);
+      return;
+    }
     if (action === "done-todo") return updateTodoStatus(todo.id, "done");
     if (action === "delete-todo") return removeTodo(todo.id);
     if (action === "start-todo") return startTodo(todo);
+  }
+
+  function handleTodoMenuAction(event) {
+    const { dateKey, todoId, action } = event.detail || {};
+    const todo = (flowTodosByDate.get(dateKey) || []).find((item) => item.id === todoId);
+    if (!todo) return;
+    selectFlowDate(dateKey);
+    elements.planDate.value = dateKey;
+    currentTodos = flowTodosByDate.get(dateKey) || [];
+    if (action === "start-todo") return startTodo(todo);
+    if (action === "edit-todo") return openTodoEditor(todo);
+    if (action === "delete-todo") return removeTodo(todo.id);
   }
 
   function handleFlowInput(event) {
@@ -1684,7 +1711,7 @@
           <div class="notion-todo-copy">
             <strong>${escapeNotionHtml(todo.title)}</strong>
             ${todo.details ? `<small>${escapeNotionHtml(todo.details)}</small>` : ""}
-            <span>${priorityLabel}优先级 · ${escapeNotionHtml(statusLabel)} · ${formatTodoSchedule(todo)} · 预计 ${todo.estimatedPomodoros || "—"} 个番茄 · 已投入 ${todo.actualMinutes || 0} 分钟</span>
+            <span>${priorityLabel}优先级 · ${escapeNotionHtml(statusLabel)} · ${formatTodoSchedule(todo)} · ${escapeNotionHtml(formatTodoEffort(todo))} · 已投入 ${todo.actualMinutes || 0} 分钟</span>
           </div>
           <div class="notion-todo-actions">
             <button class="ghost notion-edit-todo" type="button" data-todo-id="${escapeNotionHtml(todo.id)}">编辑</button>
@@ -1754,6 +1781,7 @@
                   <time>${escapeNotionHtml(dayMilestone.date)}</time>
                   <div class="phase-milestone-content">
                     <strong>${escapeNotionHtml(dayMilestone.goal || "未命名里程碑")}</strong>
+                    ${renderMilestoneProgress(dayMilestone)}
                     ${Number(dayMilestone.estimatedMinutes) > 0 ? `<small>当日预计专注 ${escapeNotionHtml(dayMilestone.estimatedMinutes)} 分钟</small>` : ""}
                     ${Array.isArray(dayMilestone.taskEstimates) && dayMilestone.taskEstimates.length
                       ? `<ul>${dayMilestone.taskEstimates.map((task) => `<li><strong>${escapeNotionHtml(task.title)}</strong> · ${escapeNotionHtml(task.estimatedMinutes)} 分钟${task.deliverable ? ` · ${escapeNotionHtml(task.deliverable)}` : ""}</li>`).join("")}</ul>` : ""}
@@ -1772,6 +1800,7 @@
                   <time>${escapeNotionHtml(item.date)}</time>
                   <div class="phase-milestone-content">
                     <strong>${escapeNotionHtml(item.goal || "未命名里程碑")}</strong>
+                    ${renderMilestoneProgress(item)}
                     ${Number(item.estimatedMinutes) > 0 ? `<small>当日预计专注 ${escapeNotionHtml(item.estimatedMinutes)} 分钟</small>` : ""}
                     ${Array.isArray(item.taskEstimates) && item.taskEstimates.length
                       ? `<ul>${item.taskEstimates.map((task) => `<li><strong>${escapeNotionHtml(task.title)}</strong> · ${escapeNotionHtml(task.estimatedMinutes)} 分钟${task.deliverable ? ` · ${escapeNotionHtml(task.deliverable)}` : ""}</li>`).join("")}</ul>` : ""}
@@ -1898,6 +1927,9 @@
       if ((start && !end) || (!start && end) || (start && end && start >= end)) {
         throw new Error("计划开始和结束时间需同时填写，且结束时间晚于开始时间。");
       }
+      if (existing?.planningMode === "percentage" && Boolean(start && end) !== Boolean(elements.todoEstimate.value)) {
+        throw new Error("比例目标排程时，请同时填写起止时间和番茄投入预算；都留空则保留为尚未排程目标。");
+      }
       const cachedPhase = (await readPlanningCache(config)).phasesByDate[dateKey]?.value;
       const phasePlan = activePhasePlan?.startDate <= dateKey && activePhasePlan?.endDate >= dateKey
         ? activePhasePlan : cachedPhase;
@@ -1907,9 +1939,10 @@
         title: elements.todoTitle.value,
         priority: elements.todoPriority.value,
         details: elements.todoDetails.value,
-        estimatedPomodoros: elements.todoEstimate.value,
-        plannedStart: start ? `${dateKey}T${start}:00` : "",
-        plannedEnd: end ? `${dateKey}T${end}:00` : "",
+        estimatedPomodoros: existing?.effortBasis === "unknown" && !elements.todoEstimate.value ? null : elements.todoEstimate.value,
+        effortBasis: existing?.planningMode === "percentage" ? (start && end && elements.todoEstimate.value ? "time_budget" : "unknown") : existing?.effortBasis || "task_estimate",
+        plannedStart: start ? `${dateKey}T${start}:00` : (existing?.planningMode === "percentage" ? null : ""),
+        plannedEnd: end ? `${dateKey}T${end}:00` : (existing?.planningMode === "percentage" ? null : ""),
         origin: existing?.origin || "user",
         status: existing?.status || "pending",
         phasePlanId: existing?.phasePlanId || phasePlan?.planId || "",
@@ -2312,6 +2345,7 @@
       elements.profileBreakMinutes.value = profile.pomodoroSettings?.breakMinutes || 5;
       elements.preferenceNote.value = profile.preferenceNote || "";
       elements.profileForm.dataset.notionUrl = profile.url || "";
+      globalThis.PersonalSystemWorkspace?.refreshScheduleEditors();
     } catch (error) {
       if (!silent) throw error;
       console.warn("Unable to load planning profile", error);
@@ -2339,6 +2373,7 @@
       elements.profileWorkMinutes.value = saved.pomodoroSettings?.workMinutes || 25;
       elements.profileBreakMinutes.value = saved.pomodoroSettings?.breakMinutes || 5;
       elements.preferenceNote.value = saved.preferenceNote || "";
+      globalThis.PersonalSystemWorkspace?.refreshScheduleEditors();
       return "个人节奏已保存到本地，后续 LLM 会立即使用，Notion 将在下次同步更新。";
     });
   }
@@ -2733,7 +2768,21 @@
   function formatTodoSchedule(todo) {
     const start = timePart(todo?.plannedStart);
     const end = timePart(todo?.plannedEnd);
-    return start && end ? `${start}–${end}` : "未排时间";
+    return start && end ? `${start}–${end}` : (todo?.effortBasis === "unknown" ? "尚未排程" : "未排时间");
+  }
+
+  function formatTodoEffort(todo) {
+    const effort = todo.estimatedPomodoros == null ? "投入未知" : `${todo.effortBasis === "time_budget" ? "投入预算" : "预计"} ${todo.estimatedPomodoros} 个番茄`;
+    return Number.isFinite(todo.targetProgressPercent) ? `${effort} · 累计预期目标 ${todo.targetProgressPercent}%（非实际进度）` : effort;
+  }
+
+  function renderMilestoneProgress(milestone) {
+    const tasks = milestone?.taskProgress;
+    if (Array.isArray(tasks) && tasks.length) {
+      return `<small>${tasks.map(task => `${escapeNotionHtml(task.title)}：累计预期 ${escapeNotionHtml(task.targetProgressPercent)}%`).join("；")}（非实际进度）</small>`;
+    }
+    // Legacy records are displayed as saved, never silently assigned a new curve.
+    return Number.isFinite(milestone?.targetProgressPercent) ? `<small>累计计划目标 ${escapeNotionHtml(milestone.targetProgressPercent)}%（旧版记录，非实际进度）</small>` : "";
   }
 
   function compareTodosBySchedule(left, right) {

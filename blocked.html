@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>极简番茄钟 · 已拦截</title>
+  <title>个人系统 · 已拦截</title>
+  <script src="vendor/lucide.min.js"></script>
+  <script src="appearance.js"></script>
   <style>
     * { box-sizing: border-box; }
     html, body {
@@ -122,16 +124,16 @@
       .actions button { flex: 1 1 120px; }
     }
   </style>
+  <link rel="stylesheet" href="design-tokens.css" />
+  <link rel="stylesheet" href="blocked.css" />
 </head>
 <body>
+  <header class="blocked-header"><div class="app-brand"><span class="brand-mark" data-icon="panels-top-left" aria-hidden="true"></span><div><strong>个人系统</strong><small>Personal System</small></div></div><div class="theme-switch" role="group" aria-label="外观主题"><button type="button" data-theme-choice="light" data-icon="sun" aria-label="浅色主题" title="浅色主题"></button><button type="button" data-theme-choice="dark" data-icon="moon" aria-label="深色主题" title="深色主题"></button></div></header>
   <main>
     <section>
-      <p class="kicker">Minimal Pomodoro</p>
+      <div class="blocked-symbol" data-icon="shield-ban" aria-hidden="true"></div>
       <h1>工作阶段已拦截</h1>
-      <p>
-        该网站 <span class="site" id="siteText"></span> 在黑名单中。
-        当前处于极简番茄钟的工作阶段，暂时不能访问。
-      </p>
+      <p class="blocked-site">被拦截的网站 <span class="site" id="siteText"></span></p>
 
       <div class="form">
         <label>
@@ -159,8 +161,8 @@
         </label>
 
         <div class="actions">
-          <button class="primary" id="applyBtn" type="button">申请访问</button>
-          <button class="ghost" id="backBtn" type="button">返回</button>
+          <button class="primary" id="applyBtn" type="button" data-icon="arrow-right">申请访问</button>
+          <button class="ghost" id="backBtn" type="button" data-icon="arrow-left">返回</button>
         </div>
 
         <div class="message" id="message"></div>

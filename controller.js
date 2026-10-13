@@ -801,7 +801,9 @@ async function refreshPendingReviewCount() {
   pendingReviewCount = pending.length;
   if (pip?.reviewBtn) {
     pip.reviewBtn.classList.toggle("has-pending", pendingReviewCount > 0);
-    pip.reviewBtn.textContent = pendingReviewCount > 0 ? `评${pendingReviewCount}` : "评";
+    pip.reviewBtn.innerHTML = globalThis.PersonalSystemUI?.icon("square-pen")?.outerHTML || "";
+    pip.reviewBtn.title = pendingReviewCount > 0 ? `补充完成情况（${pendingReviewCount} 条待填写）` : "补充完成情况";
+    pip.reviewBtn.setAttribute("aria-label", pip.reviewBtn.title);
     pip.reviewBtn.title = pendingReviewCount > 0
       ? `补充工作评价：${pendingReviewCount} 条待评价`
       : "补充工作评价";
@@ -1255,7 +1257,7 @@ function showPipUnavailable(message) {
 function buildPipDocument(doc, { mainPage = false } = {}) {
   doc.head.innerHTML = `
     <meta charset="utf-8" />
-    <title>极简番茄钟</title>
+    <title>个人系统 · 番茄钟</title>
     <style>
       :root {
         --bg: #090b0f;
@@ -1267,18 +1269,6 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
         --button-bg: rgba(20,24,30,0.88);
         --settings-bg: rgba(15,18,23,0.98);
         --shadow: rgba(0,0,0,0.58);
-      }
-
-      .surface.break-mode {
-        --bg: #f6f8fb;
-        --text: #060a10;
-        --muted: rgba(6,10,16,0.62);
-        --line: rgba(0,0,0,0.12);
-        --track: rgba(0,0,0,0.18);
-        --fill: #060a10;
-        --button-bg: rgba(255,255,255,0.70);
-        --settings-bg: rgba(247,249,252,0.98);
-        --shadow: rgba(0,0,0,0.20);
       }
 
       * {
@@ -1945,40 +1935,6 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
         line-height: 1.45;
       }
 
-      .review-group {
-        margin-top: 12px;
-      }
-
-      .review-label {
-        margin: 0 0 7px;
-        color: var(--muted);
-        font-size: 12px;
-        font-weight: 900;
-      }
-
-      .review-options {
-        display: flex;
-        gap: 7px;
-        flex-wrap: wrap;
-      }
-
-      .review-choice {
-        min-height: 28px;
-        padding: 0 10px;
-        border: 1px solid rgba(255,255,255,0.13);
-        border-radius: 999px;
-        color: var(--text);
-        background: rgba(255,255,255,0.07);
-        font-size: 12px;
-        font-weight: 900;
-        cursor: pointer;
-      }
-
-      .review-choice.active {
-        border-color: rgba(107,213,255,0.68);
-        background: rgba(107,213,255,0.18);
-      }
-
       .review-note {
         width: 100%;
         min-height: 70px;
@@ -2001,14 +1957,6 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
 
         .review-record {
           margin-bottom: 8px;
-        }
-
-        .review-group {
-          margin-top: 8px;
-        }
-
-        .review-label {
-          margin-bottom: 5px;
         }
 
         .review-note {
@@ -2264,10 +2212,13 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
         }
       }
     </style>
+    <link rel="stylesheet" href="${chrome.runtime.getURL("design-tokens.css")}" />
+    <link rel="stylesheet" href="${chrome.runtime.getURL("timer.css")}" />
   `;
 
   doc.body.innerHTML = `
     <main class="surface${mainPage ? " main-page" : ""} paused controls-visible" id="surface" tabindex="0">
+      <header class="timer-brand app-brand"><span class="brand-mark" data-icon="panels-top-left" aria-hidden="true"></span><strong>个人系统</strong></header>
 
       <section class="main-pomodoro-toolbar" aria-label="置顶小窗操作">
         <span class="main-page-status" id="mainPageStatus"></span>
@@ -2286,6 +2237,7 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
             <span class="digit" id="m1">2</span>
             <span class="digit" id="m2">5</span>
           </span>
+          <span class="time-colon" aria-hidden="true">:</span>
           <span class="pair" id="secondPair">
             <span class="digit" id="s1">0</span>
             <span class="digit" id="s2">0</span>
@@ -2345,15 +2297,17 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
       <section class="controls" id="controls">
         <div class="bar-row">
           <button class="mini-icon" id="barPlay" type="button" title="开始/暂停"><span id="barIcon"></span></button>
-          <button class="mini-icon" id="skipButton" type="button" title="结束当前计时并进入下一个番茄"><span id="skipIcon"></span></button>
-          <button class="mini-icon stop-task" id="stopTaskBtn" type="button" title="彻底停止当前番茄钟 / 多轮循环"><span id="stopTaskIcon"></span></button>
           <button class="mini-icon rest-task" id="restBtn" type="button" title="开始休息">休</button>
           <button class="mini-icon review-task" id="reviewBtn" type="button" title="补充工作评价">评</button>
           <span class="status" id="status">连续工作 · 第 1 个番茄</span>
           <span class="time-note" id="timeNote">B 休息 · V 评价 · X 停止</span>
-          <button class="mini-icon" id="leaveBtn" type="button" title="离开并停止当前番茄">离</button>
-          <button class="mini-icon" id="volumeBtn" type="button" title="提示音音量"><span id="volumeIcon"></span></button>
-          <button class="mini-icon" id="settingsBtn" type="button" title="设置">⚙</button>
+          <details class="timer-more" id="timerMore"><summary data-icon="ellipsis" aria-label="更多操作" title="更多操作"></summary><div>
+            <button class="mini-icon" id="skipButton" type="button" title="结束当前计时并进入下一个番茄"><span id="skipIcon"></span><span>结束本段</span></button>
+            <button class="mini-icon stop-task" id="stopTaskBtn" type="button" title="彻底停止当前番茄钟 / 多轮循环"><span id="stopTaskIcon"></span><span>停止计时</span></button>
+            <button class="mini-icon" id="leaveBtn" type="button" title="离开并停止当前番茄" data-icon="log-out">离开</button>
+            <button class="mini-icon" id="volumeBtn" type="button" title="提示音音量"><span id="volumeIcon"></span><span>音量</span></button>
+            <button class="mini-icon" id="settingsBtn" type="button" title="设置" data-icon="settings-2" aria-label="设置">设置</button>
+          </div></details>
         </div>
         <div class="volume-pop" id="volumePop">
           <label>
@@ -2370,6 +2324,7 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
           <button class="close-btn" id="closeSettings" type="button">×</button>
         </div>
 
+        <nav class="timer-settings-tabs" aria-label="设置分类"><button type="button" data-timer-tab="timing" aria-pressed="true">计时</button><button type="button" data-timer-tab="feedback" aria-pressed="false">声音与检测</button><button type="button" data-timer-tab="sites" aria-pressed="false">网站限制</button></nav>
         <div class="mode-buttons" id="modeButtons">
           <button class="mode-choice" data-mode="work" type="button">单独工作</button>
           <button class="mode-choice" data-mode="break" type="button">单独休息</button>
@@ -2377,32 +2332,32 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
         </div>
 
         <div class="grid">
-          <div class="field">
+          <div class="field" data-timer-group="timing">
             <label for="singleWorkInput">单独工作 / 分钟</label>
             <input id="singleWorkInput" type="number" min="1" max="240" value="25" />
           </div>
 
-          <div class="field">
+          <div class="field" data-timer-group="timing">
             <label for="singleBreakInput">单独休息 / 分钟</label>
             <input id="singleBreakInput" type="number" min="1" max="240" value="5" />
           </div>
 
-          <div class="field">
+          <div class="field" data-timer-group="timing">
             <label for="cycleWorkInput">每个番茄 / 分钟</label>
             <input id="cycleWorkInput" type="number" min="1" max="240" value="25" />
           </div>
 
-          <div class="field">
+          <div class="field" data-timer-group="timing">
             <label for="cycleBreakInput">手动休息 / 分钟</label>
             <input id="cycleBreakInput" type="number" min="1" max="240" value="5" />
           </div>
 
-          <div class="field">
+          <div class="field" data-timer-group="feedback" hidden>
             <label for="volumeInput">提示音音量 / %</label>
             <input id="volumeInput" type="number" min="0" max="100" value="75" />
           </div>
 
-          <div class="field">
+          <div class="field" data-timer-group="feedback" hidden>
             <label for="presenceModeInput">在场检测</label>
             <select id="presenceModeInput">
               <option value="normal">普通 · 15分钟</option>
@@ -2412,12 +2367,12 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
             </select>
           </div>
 
-          <div class="field wide">
+          <div class="field wide" data-timer-group="sites" hidden>
             <label for="blacklistInput">工作阶段黑名单 / 每行一个域名</label>
             <textarea id="blacklistInput" placeholder="youtube.com&#10;bilibili.com&#10;twitter.com"></textarea>
           </div>
 
-          <div class="field wide">
+          <div class="field wide" data-timer-group="sites" hidden>
             <label for="whitelistInput">白名单例外 / 每行一个域名</label>
             <textarea id="whitelistInput" placeholder="docs.google.com&#10;github.com"></textarea>
           </div>
@@ -2433,6 +2388,22 @@ function buildPipDocument(doc, { mainPage = false } = {}) {
     </main>
   `;
 
+  globalThis.PersonalSystemUI?.registerDocument(doc);
+  const more = doc.getElementById("timerMore");
+  doc.addEventListener("click", (event) => {
+    if (!more.contains(event.target) || event.target.closest("button")) more.open = false;
+    const tab = event.target.closest("[data-timer-tab]");
+    if (!tab) return;
+    for (const button of doc.querySelectorAll("[data-timer-tab]")) button.setAttribute("aria-pressed", String(button === tab));
+    for (const field of doc.querySelectorAll("[data-timer-group]")) field.hidden = field.dataset.timerGroup !== tab.dataset.timerTab;
+    doc.getElementById("modeButtons").hidden = tab.dataset.timerTab !== "timing";
+  });
+  doc.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && more.open) { event.preventDefault(); event.stopImmediatePropagation(); more.open = false; more.querySelector("summary").focus(); }
+  }, true);
+  for (const button of doc.querySelectorAll("button[title]")) {
+    if (!button.hasAttribute("aria-label")) button.setAttribute("aria-label", button.title);
+  }
   const $ = (id) => doc.getElementById(id);
   pip = {
     doc,
@@ -2828,11 +2799,11 @@ function adaptTimeLayout() {
   const controlsRect = pip.controls?.getBoundingClientRect?.();
   const titleReserve = viewportHeight < 210 ? 32 : Math.ceil((titleRect?.height || 34) + (viewportHeight < 260 ? 10 : 20));
   const controlsReserve = Math.ceil((controlsRect?.height || 42) + (viewportHeight < 260 ? 10 : 18));
-  const maxWidth = Math.max(90, viewportWidth - 28);
-  const maxHeight = Math.max(38, viewportHeight - titleReserve - controlsReserve);
+  const maxWidth = Math.max(90, pip.timeWrap.clientWidth - 32);
+  const maxHeight = Math.max(38, Math.min(pip.timeWrap.clientHeight - 12, viewportHeight - titleReserve - controlsReserve));
 
   let low = 22;
-  let high = 190;
+  let high = 132;
   let best = low;
 
   pip.timeDisplay.style.transform = "translateZ(0) scale(1)";
@@ -3244,14 +3215,16 @@ function render() {
   if (pip.stopTaskBtn) {
     pip.stopTaskBtn.disabled = timer.finished && !running && !activeTimelineRecordId;
   }
-  pip.restBtn.textContent = timer.phase === "break" ? "工" : "休";
+  pip.restBtn.innerHTML = globalThis.PersonalSystemUI?.icon(timer.phase === "break" ? "briefcase-business" : "coffee")?.outerHTML || "";
   if (pip.reviewBtn) {
     pip.reviewBtn.classList.toggle("has-pending", pendingReviewCount > 0);
-    pip.reviewBtn.textContent = pendingReviewCount > 0 ? `评${pendingReviewCount}` : "评";
+    pip.reviewBtn.innerHTML = globalThis.PersonalSystemUI?.icon("square-pen")?.outerHTML || "";
+    pip.reviewBtn.title = pendingReviewCount > 0 ? `补充完成情况（${pendingReviewCount} 条待填写）` : "补充完成情况";
+    pip.reviewBtn.setAttribute("aria-label", pip.reviewBtn.title);
   }
   pip.restBtn.title = timer.phase === "break" ? "结束休息并开始工作" : "开始休息";
   pip.restBtn.disabled = timer.finished;
-  pip.leaveBtn.textContent = "离";
+  pip.leaveBtn.innerHTML = (globalThis.PersonalSystemUI?.icon("log-out")?.outerHTML || "") + "<span>离开</span>";
   pip.leaveBtn.classList.toggle("leave-active", Boolean(leaveState));
   pip.leaveBtn.disabled = !running || timer.finished || Boolean(leaveState);
   pip.volumeIcon.innerHTML = volumeSvg(settings.volume);
@@ -3273,7 +3246,7 @@ function render() {
   requestAdaptiveTimeLayout();
 
   if (pipWindow && !pipWindow.closed) {
-    pipWindow.document.title = `极简番茄钟 ${mm} ${ss}`;
+    pipWindow.document.title = `个人系统 · ${mm}:${ss}`;
   }
 }
 
@@ -3361,31 +3334,23 @@ async function closePip() {
 }
 
 function playSvg() {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>`;
+  return globalThis.PersonalSystemUI?.icon("play")?.outerHTML || "";
 }
 
 function pauseSvg() {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg>`;
+  return globalThis.PersonalSystemUI?.icon("pause")?.outerHTML || "";
 }
 
 function skipSvg() {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l9-7-9-7z"></path><path d="M15 5h3v14h-3z"></path></svg>`;
+  return globalThis.PersonalSystemUI?.icon("skip-forward")?.outerHTML || "";
 }
 
 function stopSquareSvg() {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"></path></svg>`;
+  return globalThis.PersonalSystemUI?.icon("square")?.outerHTML || "";
 }
 
 function volumeSvg(volume) {
-  if (volume <= 0) {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16.5 9.5 21 14m0-4.5L16.5 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>`;
-  }
-
-  if (volume < 45) {
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 9.5c.9 1.2.9 3.8 0 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>`;
-  }
-
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 8c1.5 2 1.5 6 0 8M19 5.5c3 3.8 3 9.2 0 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>`;
+  return globalThis.PersonalSystemUI?.icon(volume <= 0 ? "volume-x" : volume < 45 ? "volume-1" : "volume-2")?.outerHTML || "";
 }
 
 function getAudioContext() {

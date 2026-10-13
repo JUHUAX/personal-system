@@ -30,7 +30,7 @@ class StaticRegressionTests(unittest.TestCase):
 
     def test_daily_review_supports_review_only_fallback(self):
         source = self.read("notion-client.js")
-        self.assertIn('"generateNextTodos=false', source)
+        self.assertIn("input.generateNextTodos === false", self.read("llm-prompt-contracts.js"))
         self.assertIn("nextTodoSkipped: !generateNextTodos", source)
         self.assertLess(source.index("await writeDailyReview(dateKey"), source.index("await upsertDailyTodos(nextTodoDate"))
 
